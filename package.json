@@ -1,0 +1,96 @@
+{
+  "name": "@gmaclennan/zip-reader",
+  "version": "1.0.0-pre.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./mac": {
+      "types": "./dist/mac-archive.d.ts",
+      "import": "./dist/mac-archive.js"
+    },
+    "./buffer-source": {
+      "types": "./dist/sources/buffer.d.ts",
+      "import": "./dist/sources/buffer.js"
+    },
+    "./blob-source": {
+      "types": "./dist/sources/blob.d.ts",
+      "import": "./dist/sources/blob.js"
+    },
+    "./file-source": {
+      "types": "./dist/sources/file.d.ts",
+      "import": "./dist/sources/file.js"
+    }
+  },
+  "imports": {
+    "#crc32": {
+      "browser": "./dist/crc-browser.js",
+      "default": "./dist/crc-node.js"
+    }
+  },
+  "type": "module",
+  "scripts": {
+    "test": "run-s test:types test:lint test:vitest",
+    "prepare": "husky",
+    "test:types": "tsc --noEmit",
+    "test:lint": "eslint",
+    "test:vitest": "vitest",
+    "bench": "vitest bench --project node",
+    "coverage": "vitest run --coverage",
+    "format": "prettier --write .",
+    "prepack": "rimraf dist && tsc"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "zip",
+    "archive",
+    "streaming",
+    "web streams",
+    "compression streams",
+    "javascript",
+    "typescript"
+  ],
+  "author": "Gregor MacLennan <gmaclennan@gmail.com>",
+  "license": "MIT",
+  "description": "A modern streaming ZIP archive reader for JavaScript that uses the Web Streams API and Compression Streams API.",
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/yauzl-promise": "^4.0.1",
+    "@vitest/browser": "^4.0.7",
+    "@vitest/browser-playwright": "^4.0.7",
+    "@vitest/coverage-istanbul": "^4.0.7",
+    "@zip.js/zip.js": "^2.8.23",
+    "eslint": "^9.39.1",
+    "execa": "^9.6.0",
+    "fflate": "^0.8.2",
+    "globals": "^16.5.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.6",
+    "npm-run-all": "^4.1.5",
+    "playwright": "^1.56.1",
+    "prettier": "^3.6.2",
+    "rimraf": "^6.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.7",
+    "yauzl-promise": "^4.0.0",
+    "zip-writer": "^2.1.1"
+  },
+  "lint-staged": {
+    "*.js": "eslint --cache --fix",
+    "*.{js,css,md}": "prettier --write"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gmaclennan/zip-reader.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gmaclennan/zip-reader/issues"
+  },
+  "homepage": "https://github.com/gmaclennan/zip-reader#readme",
+  "dependencies": {
+    "p-mutex": "^1.0.0"
+  }
+}

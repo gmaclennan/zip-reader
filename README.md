@@ -95,6 +95,34 @@ try {
 }
 ```
 
+### `FileSystemFileHandleSource`
+
+Reads from an [Origin Private File System (OPFS)](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system)
+`FileSystemFileHandle`. Efficient for browser environments where ZIP files are
+stored in OPFS, since it reads only the byte ranges needed rather than loading
+the entire file into memory.
+
+Use the static `FileSystemFileHandleSource.open()` factory to construct an
+instance, since determining the file size requires an async call.
+
+```ts
+import { FileSystemFileHandleSource } from "@gmaclennan/zip-reader/opfs-source";
+
+// Get a handle from OPFS
+const root = await navigator.storage.getDirectory();
+const handle = await root.getFileHandle("archive.zip");
+
+const source = await FileSystemFileHandleSource.open(handle);
+const zip = await ZipReader.from(source);
+
+for await (const entry of zip) {
+  if (!entry.isDirectory) {
+    const stream = entry.readable();
+    // ...
+  }
+}
+```
+
 ### Custom Sources
 
 Implement the `RandomAccessSource` interface for any data backend:

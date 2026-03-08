@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ZipReader, ZipEntry } from "../src/index.js";
 import { BufferSource } from "../src/sources/buffer.js";
 import { BlobSource } from "../src/sources/blob.js";
+import { FileSystemFileHandleSource } from "../src/sources/opfs.js";
 
 async function collectStream(
   stream: ReadableStream<Uint8Array>,
@@ -213,5 +214,147 @@ describe("ZipReader (browser-compatible)", () => {
       expect(entry.isEncrypted).toBe(true);
       expect(() => entry.readable()).toThrow("Decryption is not supported");
     }
+  });
+});
+
+describe("FileSystemFileHandleSource (OPFS)", () => {
+  async function writeToOpfs(
+    filename: string,
+    data: Uint8Array,
+  ): Promise<FileSystemFileHandle> {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(data);
+    await writable.close();
+    return fileHandle;
+  }
+
+  it("reads a stored file from an OPFS FileSystemFileHandle", async () => {
+    const content = new TextEncoder().encode("Hello from OPFS!");
+    const zipData = createTestZip("hello.txt", content);
+
+    const fileHandle = await writeToOpfs("test-opfs-read.zip", zipData);
+    const source = await FileSystemFileHandleSource.open(fileHandle);
+
+    expect(source.size).toBe(zipData.byteLength);
+
+    const zip = await ZipReader.from(source);
+    const entries: ZipEntry[] = [];
+    for await (const entry of zip) {
+      entries.push(entry);
+    }
+    expect(entries.length).toBe(1);
+    expect(entries[0].name).toBe("hello.txt");
+    expect(entries[0].isCompressed).toBe(false);
+    expect(entries[0].isDirectory).toBe(false);
+
+    const stream = entries[0].readable();
+    const result = await collectStream(stream);
+    expect(result).toEqual(content);
+  });
+
+  it("validates CRC32 for OPFS source", async () => {
+    const content = new TextEncoder().encode("CRC32 check");
+    const zipData = createTestZip("crc.txt", content);
+    // Corrupt a byte in the file content area (after 30-byte LFH + 7-byte name)
+    zipData[30 + 7] ^= 0xff;
+
+    const fileHandle = await writeToOpfs("test-opfs-crc.zip", zipData);
+    const source = await FileSystemFileHandleSource.open(fileHandle);
+    const zip = await ZipReader.from(source);
+
+    for await (const entry of zip) {
+      const stream = entry.readable({ validateCrc32: true });
+      await expect(collectStream(stream)).rejects.toThrow("CRC32 validation failed");
+    }
+  });
+
+  it("throws RangeError for out-of-bounds reads", async () => {
+    const content = new TextEncoder().encode("small");
+    const zipData = createTestZip("s.txt", content);
+
+    const fileHandle = await writeToOpfs("test-opfs-oob.zip", zipData);
+    const source = await FileSystemFileHandleSource.open(fileHandle);
+
+    await expect(source.read(0, source.size + 1)).rejects.toThrow(RangeError);
+    await expect(source.read(-1, 1)).rejects.toThrow(RangeError);
+  });
+
+  it("reads entry properties correctly from OPFS source", async () => {
+    const content = new TextEncoder().encode("property check");
+    const zipData = createTestZip("dir/file.txt", content);
+
+    const fileHandle = await writeToOpfs("test-opfs-props.zip", zipData);
+    const source = await FileSystemFileHandleSource.open(fileHandle);
+    const zip = await ZipReader.from(source);
+
+    for await (const entry of zip) {
+      expect(entry.name).toBe("dir/file.txt");
+      expect(entry.compressedSize).toBe(content.length);
+      expect(entry.uncompressedSize).toBe(content.length);
+      expect(entry.isEncrypted).toBe(false);
+      expect(entry.compressionMethod).toBe(0);
+    }
+  });
+
+  describe("source closure lifecycle", () => {
+    it("close() is idempotent", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-idempotent.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      await source.close();
+      await source.close(); // should not throw
+    });
+
+    it("read() after close() throws 'Source is closed'", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-read.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      await source.close();
+      await expect(source.read(0, 4)).rejects.toThrow("Source is closed");
+    });
+
+    it("ZipReader.from() fails gracefully when source is closed before parsing", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-before-from.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      await source.close();
+      await expect(ZipReader.from(source)).rejects.toThrow("Source is closed");
+    });
+
+    it("iteration fails gracefully when source is closed after from()", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-mid-iter.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      const zip = await ZipReader.from(source);
+      await source.close(); // close externally after reader is created
+      await expect(
+        (async () => {
+          for await (const _entry of zip) {
+            // CD read should fail
+          }
+        })()
+      ).rejects.toThrow("Source is closed");
+    });
+
+    it("entry stream fails gracefully when source is closed before reading", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-before-stream.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      const zip = await ZipReader.from(source);
+      const entries: ZipEntry[] = [];
+      for await (const entry of zip) {
+        entries.push(entry);
+      }
+      await source.close(); // consumer closes the source directly
+      const stream = entries[0].readable();
+      await expect(collectStream(stream)).rejects.toThrow("Source is closed");
+    });
   });
 });

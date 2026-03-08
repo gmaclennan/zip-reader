@@ -25,14 +25,14 @@ and
 ## Installation
 
 ```bash
-npm install zip-reader
+npm install @gmaclennan/zip-reader
 ```
 
 ## Basic Usage
 
 ```ts
-import { ZipReader } from "zip-reader";
-import { BufferSource } from "zip-reader/buffer-source";
+import { ZipReader } from "@gmaclennan/zip-reader";
+import { BufferSource } from "@gmaclennan/zip-reader/buffer-source";
 
 const zipData = new Uint8Array(/* ... */);
 const zip = await ZipReader.from(new BufferSource(zipData));
@@ -58,7 +58,7 @@ imports to keep the main bundle small.
 Wraps a `Uint8Array` or `ArrayBuffer` for in-memory ZIP reading.
 
 ```ts
-import { BufferSource } from "zip-reader/buffer-source";
+import { BufferSource } from "@gmaclennan/zip-reader/buffer-source";
 
 const source = new BufferSource(zipBytes);
 const zip = await ZipReader.from(source);
@@ -69,7 +69,7 @@ const zip = await ZipReader.from(source);
 Wraps a `Blob` for browser-based ZIP reading.
 
 ```ts
-import { BlobSource } from "zip-reader/blob-source";
+import { BlobSource } from "@gmaclennan/zip-reader/blob-source";
 
 const response = await fetch("archive.zip");
 const blob = await response.blob();
@@ -82,7 +82,7 @@ Reads directly from a file on disk (Node.js only). Efficient for large archives
 since it doesn't load the entire file into memory.
 
 ```ts
-import { FileSource } from "zip-reader/file-source";
+import { FileSource } from "@gmaclennan/zip-reader/file-source";
 
 const source = await FileSource.open("archive.zip");
 try {
@@ -100,7 +100,7 @@ try {
 Implement the `RandomAccessSource` interface for any data backend:
 
 ```ts
-import type { RandomAccessSource } from "zip-reader";
+import type { RandomAccessSource } from "@gmaclennan/zip-reader";
 
 class HttpRangeSource implements RandomAccessSource {
   readonly size: number;
@@ -130,9 +130,9 @@ Mac archive support is a separate import so it doesn't increase bundle size for
 applications that don't need it.
 
 ```ts
-import { ZipReader } from "zip-reader";
-import { BufferSource } from "zip-reader/buffer-source";
-import { macArchive } from "zip-reader/mac";
+import { ZipReader } from "@gmaclennan/zip-reader";
+import { BufferSource } from "@gmaclennan/zip-reader/buffer-source";
+import { macArchive } from "@gmaclennan/zip-reader/mac";
 
 const zip = await ZipReader.from(new BufferSource(zipData), {
   macArchiveFactory: macArchive,
@@ -166,7 +166,7 @@ const zip = await ZipReader.from(source, {
   validateEntrySizes: true, // default
   validateFilenames: true, // default
   uniqueEntryOffsets: true, // default
-  macArchiveFactory: macArchive, // optional, import from "zip-reader/mac"
+  macArchiveFactory: macArchive, // optional, import from "@gmaclennan/zip-reader/mac"
 });
 ```
 
@@ -295,7 +295,7 @@ for await (const entry of zip) {
   bombs. Set to `false` for archives that legitimately share file data (e.g.
   tile maps with deduplicated tiles). Default: `true`
 - `macArchiveFactory?: MacArchiveFactory` - Factory for Mac OS Archive Utility
-  support. Import from `"zip-reader/mac"`.
+  support. Import from `"@gmaclennan/zip-reader/mac"`.
 
 ### `RandomAccessSource`
 
@@ -329,7 +329,7 @@ open an issue.
 | **Structural consistency**          | Entry count vs. Central Directory size, CD bounds vs. EOCD offset                     | Rejects archives where the EOCD metadata is internally inconsistent, catching malformed files early.                                                                      |
 | **ZIP64 safe integers**             | Rejects 64-bit values above `Number.MAX_SAFE_INTEGER`                                 | Prevents silent precision loss that could cause incorrect offsets or sizes.                                                                                               |
 | **Source bounds checking**          | All built-in sources validate read offsets                                            | Throws a clear `RangeError` rather than returning silently short data.                                                                                                    |
-| **File descriptor cleanup**         | `ZipReader.from()` closes the source if parsing fails                                 | Prevents file handle leaks when opening an invalid archive via `FileSource`.                                                                                              |
+| **File descriptor cleanup**         | Caller should close the source in a `finally` block                                   | If parsing fails, the source is not automatically closed — use `try/finally` with `source.close()` to prevent file handle leaks when using `FileSource`.                 |
 | **Strong encryption**               | Rejected at parse time                                                                | Throws rather than returning garbage data.                                                                                                                                |
 | **Multi-disk archives**             | Rejected at parse time                                                                | Not supported; detected and rejected cleanly.                                                                                                                             |
 | **Mac OS Archive Utility**          | Detects and corrects truncated 32-bit values                                          | Mac's built-in archiver creates non-conformant ZIPs with truncated sizes, offsets, and entry counts. Opt-in via `macArchiveFactory` option.                               |

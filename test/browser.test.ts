@@ -217,7 +217,11 @@ describe("ZipReader (browser-compatible)", () => {
   });
 });
 
-describe("FileSystemFileHandleSource (OPFS)", () => {
+const supportsOPFS =
+  typeof navigator !== "undefined" &&
+  typeof navigator.storage?.getDirectory === "function";
+
+describe.skipIf(!supportsOPFS)("FileSystemFileHandleSource (OPFS)", () => {
   async function writeToOpfs(
     filename: string,
     data: Uint8Array,

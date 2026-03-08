@@ -217,7 +217,30 @@ describe("ZipReader (browser-compatible)", () => {
   });
 });
 
-describe("FileSystemFileHandleSource (OPFS)", () => {
+// Probe actual OPFS write support (not just API existence) via top-level
+// await, which is valid in ESM browser modules. WebKit has partial OPFS
+// support: getDirectory() exists but createWritable() may throw or be absent.
+const supportsOPFS = await (async () => {
+  if (
+    typeof navigator === "undefined" ||
+    typeof navigator.storage?.getDirectory !== "function"
+  )
+    return false;
+  try {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle("__vitest_opfs_probe__", {
+      create: true,
+    });
+    const writable = await handle.createWritable();
+    await writable.close();
+    await root.removeEntry("__vitest_opfs_probe__");
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe.skipIf(!supportsOPFS)("FileSystemFileHandleSource (OPFS)", () => {
   async function writeToOpfs(
     filename: string,
     data: Uint8Array,

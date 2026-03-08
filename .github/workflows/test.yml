@@ -59,11 +59,17 @@ jobs:
         if: runner.os == 'macOS' && steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps webkit
 
-      - name: Run tests
-        run: |
-          npm run test:types
-          npm run test:lint
-          npm run test:vitest -- --coverage
+      - name: Type check
+        shell: bash
+        run: npm run test:types
+
+      - name: Lint
+        shell: bash
+        run: npm run test:lint
+
+      - name: Run tests with coverage
+        shell: bash
+        run: npm run test:vitest -- --coverage
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5

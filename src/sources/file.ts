@@ -5,6 +5,7 @@ import { open, stat, type FileHandle } from "node:fs/promises";
 export class FileSource implements RandomAccessSource {
   readonly size: number;
   readonly #handle: FileHandle;
+  #closed = false;
 
   private constructor(handle: FileHandle, size: number) {
     this.#handle = handle;
@@ -18,6 +19,9 @@ export class FileSource implements RandomAccessSource {
   }
 
   async read(offset: number, length: number): Promise<Uint8Array> {
+    if (this.#closed) {
+      throw new Error("Source is closed");
+    }
     if (offset < 0 || offset + length > this.size) {
       throw new RangeError(
         `Read out of bounds: offset=${offset} length=${length} size=${this.size}`
@@ -32,6 +36,8 @@ export class FileSource implements RandomAccessSource {
   }
 
   async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
     await this.#handle.close();
   }
 }

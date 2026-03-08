@@ -141,9 +141,4 @@ export class ZipReader {
     }
   }
 
-  async close(): Promise<void> {
-    if (this.#source.close) {
-      await this.#source.close();
-    }
-  }
 }

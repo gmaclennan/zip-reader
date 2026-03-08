@@ -336,14 +336,6 @@ describe("ZipReader", () => {
     });
   });
 
-  describe("close", () => {
-    it("close is a no-op for buffer source", async () => {
-      const zipData = readFileSync(join(BASIC_DIR, "test.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
-      await zip.close();
-    });
-  });
-
   describe("FileSource", () => {
     it("reads a zip via FileSource", async () => {
       const { FileSource } = await import("../src/sources/file.js");

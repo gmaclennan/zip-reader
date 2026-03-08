@@ -160,20 +160,6 @@ Create a `ZipReader` from a `RandomAccessSource`.
 
 **Returns:** `Promise<ZipReader>`
 
-If the source requires cleanup (e.g. `FileSource`), wrap the call in a
-`try/catch` so the source is closed if parsing fails:
-
-```ts
-const source = await FileSource.open("archive.zip");
-let zip: ZipReader;
-try {
-  zip = await ZipReader.from(source);
-} catch (err) {
-  await source.close();
-  throw err;
-}
-```
-
 ```ts
 const zip = await ZipReader.from(source, {
   validateCrc32: true, // default
@@ -204,15 +190,6 @@ Iterate over all entries in the archive.
 for await (const entry of zip) {
   console.log(entry.name);
 }
-```
-
-##### `close(): Promise<void>`
-
-Close the underlying source. Call this when done reading, especially with
-`FileSource`.
-
-```ts
-await zip.close();
 ```
 
 ### `ZipEntry`

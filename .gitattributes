@@ -1,0 +1,7 @@
+# Default: auto-detect line endings for text files
+* text=auto eol=lf
+
+# Treat all test fixture files as binary to prevent CRLF conversion.
+# The fixture files must stay byte-for-byte identical to what the zip
+# archives store; git CRLF conversion would cause mismatches on Windows.
+test/fixtures/**  -text

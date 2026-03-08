@@ -49,7 +49,7 @@ jobs:
           sync-semver-tags: false
           access: "public"
           # This prefix is added before the prerelease number, e.g. `v3.0.0-next.0`
-          prerelease-prefix: "next"
+          prerelease-prefix: "pre"
           semver: ${{ github.event.inputs.semver }}
           # Prereleases are published under the `next` npm dist-tag
           npm-tag: ${{ startsWith(github.event.inputs.semver, 'pre') && 'next' || 'latest' }}

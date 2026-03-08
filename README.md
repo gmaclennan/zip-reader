@@ -160,6 +160,20 @@ Create a `ZipReader` from a `RandomAccessSource`.
 
 **Returns:** `Promise<ZipReader>`
 
+If the source requires cleanup (e.g. `FileSource`), wrap the call in a
+`try/catch` so the source is closed if parsing fails:
+
+```ts
+const source = await FileSource.open("archive.zip");
+let zip: ZipReader;
+try {
+  zip = await ZipReader.from(source);
+} catch (err) {
+  await source.close();
+  throw err;
+}
+```
+
 ```ts
 const zip = await ZipReader.from(source, {
   validateCrc32: true, // default
@@ -329,7 +343,6 @@ open an issue.
 | **Structural consistency**          | Entry count vs. Central Directory size, CD bounds vs. EOCD offset                     | Rejects archives where the EOCD metadata is internally inconsistent, catching malformed files early.                                                                      |
 | **ZIP64 safe integers**             | Rejects 64-bit values above `Number.MAX_SAFE_INTEGER`                                 | Prevents silent precision loss that could cause incorrect offsets or sizes.                                                                                               |
 | **Source bounds checking**          | All built-in sources validate read offsets                                            | Throws a clear `RangeError` rather than returning silently short data.                                                                                                    |
-| **File descriptor cleanup**         | Caller should close the source in a `finally` block                                   | If parsing fails, the source is not automatically closed — use `try/finally` with `source.close()` to prevent file handle leaks when using `FileSource`.                 |
 | **Strong encryption**               | Rejected at parse time                                                                | Throws rather than returning garbage data.                                                                                                                                |
 | **Multi-disk archives**             | Rejected at parse time                                                                | Not supported; detected and rejected cleanly.                                                                                                                             |
 | **Mac OS Archive Utility**          | Detects and corrects truncated 32-bit values                                          | Mac's built-in archiver creates non-conformant ZIPs with truncated sizes, offsets, and entry counts. Opt-in via `macArchiveFactory` option.                               |

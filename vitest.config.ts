@@ -31,7 +31,7 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: ["test/**/*.test.ts"],
-          exclude: ["**/node_modules/**", "**/.git/**", "vendor/**"],
+          exclude: ["test/browser.test.ts", "**/node_modules/**", "**/.git/**", "vendor/**"],
           alias: {
             "#crc32": "/src/crc-node.ts",
           },

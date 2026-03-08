@@ -219,7 +219,9 @@ describe("ZipReader (browser-compatible)", () => {
 
 const supportsOPFS =
   typeof navigator !== "undefined" &&
-  typeof navigator.storage?.getDirectory === "function";
+  typeof navigator.storage?.getDirectory === "function" &&
+  typeof FileSystemFileHandle !== "undefined" &&
+  "createWritable" in FileSystemFileHandle.prototype;
 
 describe.skipIf(!supportsOPFS)("FileSystemFileHandleSource (OPFS)", () => {
   async function writeToOpfs(

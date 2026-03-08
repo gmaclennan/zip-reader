@@ -799,20 +799,11 @@ describe("Edge cases and malformed ZIP handling", () => {
     });
   });
 
-  describe("close", () => {
-    it("close works on BufferSource (no-op)", async () => {
-      const zip = buildZip("test.txt", new TextEncoder().encode("test"));
-      const reader = await ZipReader.from(new BufferSource(zip));
-      await reader.close(); // should not throw
-    });
-  });
-
   describe("source closure lifecycle", () => {
     /** A BufferSource wrapper that tracks closure and blocks reads after close. */
     class ClosableBufferSource implements RandomAccessSource {
       readonly #inner: BufferSource;
       #closed = false;
-      closeCallCount = 0;
 
       constructor(data: Uint8Array) {
         this.#inner = new BufferSource(data);
@@ -826,38 +817,8 @@ describe("Edge cases and malformed ZIP handling", () => {
       }
       async close(): Promise<void> {
         this.#closed = true;
-        this.closeCallCount++;
       }
     }
-
-    it("ZipReader.close() then iterate throws 'ZipReader is closed'", async () => {
-      const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
-      const reader = await ZipReader.from(new BufferSource(zip));
-      await reader.close();
-      await expect(
-        (async () => {
-          for await (const _entry of reader) {
-            // should not reach here
-          }
-        })()
-      ).rejects.toThrow("ZipReader is closed");
-    });
-
-    it("ZipReader.close() is idempotent: source.close() called only once", async () => {
-      const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
-      const source = new ClosableBufferSource(zip);
-      const reader = await ZipReader.from(source);
-      await reader.close();
-      await reader.close(); // second call should be a no-op
-      expect(source.closeCallCount).toBe(1);
-    });
-
-    it("ZipReader.close() on source without close() does not throw", async () => {
-      const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
-      const reader = await ZipReader.from(new BufferSource(zip));
-      await reader.close();
-      await reader.close(); // no-op, BufferSource has no close()
-    });
 
     it("entry.readable() stream errors when source is closed before reading", async () => {
       const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
@@ -870,8 +831,8 @@ describe("Edge cases and malformed ZIP handling", () => {
         entries.push(entry);
       }
 
-      // Close the reader (closes the source)
-      await reader.close();
+      // Close the source directly — the consumer's responsibility
+      await source.close();
 
       // Now try to read an entry stream — the source is closed
       const stream = entries[0].readable();
@@ -1056,7 +1017,7 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const entry of reader) {
             entries.push(entry);
           }
-          await reader.close(); // closes the source
+          await source.close(); // consumer closes the source directly
           const stream = entries[0].readable();
           await expect(collectStream(stream)).rejects.toThrow("Source is closed");
         } finally {

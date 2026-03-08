@@ -21,6 +21,10 @@
     "./file-source": {
       "types": "./dist/sources/file.d.ts",
       "import": "./dist/sources/file.js"
+    },
+    "./opfs-source": {
+      "types": "./dist/sources/opfs.d.ts",
+      "import": "./dist/sources/opfs.js"
     }
   },
   "imports": {

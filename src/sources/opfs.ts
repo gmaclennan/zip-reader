@@ -19,6 +19,7 @@ import type { RandomAccessSource } from "../types.js";
 export class FileSystemFileHandleSource implements RandomAccessSource {
   readonly size: number;
   readonly #file: File;
+  #closed = false;
 
   private constructor(file: File) {
     this.#file = file;
@@ -33,6 +34,9 @@ export class FileSystemFileHandleSource implements RandomAccessSource {
   }
 
   async read(offset: number, length: number): Promise<Uint8Array> {
+    if (this.#closed) {
+      throw new Error("Source is closed");
+    }
     if (offset < 0 || offset + length > this.size) {
       throw new RangeError(
         `Read out of bounds: offset=${offset} length=${length} size=${this.size}`
@@ -41,5 +45,9 @@ export class FileSystemFileHandleSource implements RandomAccessSource {
     const slice = this.#file.slice(offset, offset + length);
     const buffer = await slice.arrayBuffer();
     return new Uint8Array(buffer);
+  }
+
+  async close(): Promise<void> {
+    this.#closed = true;
   }
 }

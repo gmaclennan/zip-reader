@@ -297,4 +297,64 @@ describe("FileSystemFileHandleSource (OPFS)", () => {
       expect(entry.compressionMethod).toBe(0);
     }
   });
+
+  describe("source closure lifecycle", () => {
+    it("close() is idempotent", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-idempotent.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      await source.close();
+      await source.close(); // should not throw
+    });
+
+    it("read() after close() throws 'Source is closed'", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-read.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      await source.close();
+      await expect(source.read(0, 4)).rejects.toThrow("Source is closed");
+    });
+
+    it("ZipReader.from() fails gracefully when source is closed before parsing", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-before-from.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      await source.close();
+      await expect(ZipReader.from(source)).rejects.toThrow("Source is closed");
+    });
+
+    it("iteration fails gracefully when source is closed after from()", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-mid-iter.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      const zip = await ZipReader.from(source);
+      await source.close(); // close externally after reader is created
+      await expect(
+        (async () => {
+          for await (const _entry of zip) {
+            // CD read should fail
+          }
+        })()
+      ).rejects.toThrow("Source is closed");
+    });
+
+    it("entry stream fails gracefully when source is closed before reading", async () => {
+      const content = new TextEncoder().encode("hello");
+      const zipData = createTestZip("hello.txt", content);
+      const fileHandle = await writeToOpfs("test-opfs-close-before-stream.zip", zipData);
+      const source = await FileSystemFileHandleSource.open(fileHandle);
+      const zip = await ZipReader.from(source);
+      const entries: ZipEntry[] = [];
+      for await (const entry of zip) {
+        entries.push(entry);
+      }
+      await source.close(); // consumer closes the source directly
+      const stream = entries[0].readable();
+      await expect(collectStream(stream)).rejects.toThrow("Source is closed");
+    });
+  });
 });

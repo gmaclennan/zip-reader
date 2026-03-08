@@ -41,6 +41,7 @@ export class ZipReader {
   readonly #eocd: EocdInfo;
   readonly #opts: ResolvedOptions;
   readonly #source: RandomAccessSource;
+  #closed = false;
 
   private constructor(
     source: RandomAccessSource,
@@ -90,6 +91,9 @@ export class ZipReader {
   }
 
   async *[Symbol.asyncIterator](): AsyncGenerator<ZipEntry> {
+    if (this.#closed) {
+      throw new Error("ZipReader is closed");
+    }
     const macArchiveHandler = this.#opts.macArchiveHandler;
     // When Mac handler is active, use its dynamic getters for entryCount etc.
     const cd: CdSource = macArchiveHandler ?? this.#eocd;
@@ -142,6 +146,8 @@ export class ZipReader {
   }
 
   async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
     if (this.#source.close) {
       await this.#source.close();
     }

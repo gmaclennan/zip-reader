@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ZipReader, ZipEntry } from "../src/index.js";
 import { BufferSource } from "../src/sources/buffer.js";
+import { FileSource } from "../src/sources/file.js";
+import type { RandomAccessSource } from "../src/types.js";
 
 async function collectStream(
   stream: ReadableStream<Uint8Array>
@@ -799,6 +804,265 @@ describe("Edge cases and malformed ZIP handling", () => {
       const zip = buildZip("test.txt", new TextEncoder().encode("test"));
       const reader = await ZipReader.from(new BufferSource(zip));
       await reader.close(); // should not throw
+    });
+  });
+
+  describe("source closure lifecycle", () => {
+    /** A BufferSource wrapper that tracks closure and blocks reads after close. */
+    class ClosableBufferSource implements RandomAccessSource {
+      readonly #inner: BufferSource;
+      #closed = false;
+      closeCallCount = 0;
+
+      constructor(data: Uint8Array) {
+        this.#inner = new BufferSource(data);
+      }
+      get size() {
+        return this.#inner.size;
+      }
+      async read(offset: number, length: number): Promise<Uint8Array> {
+        if (this.#closed) throw new Error("Source is closed");
+        return this.#inner.read(offset, length);
+      }
+      async close(): Promise<void> {
+        this.#closed = true;
+        this.closeCallCount++;
+      }
+    }
+
+    it("ZipReader.close() then iterate throws 'ZipReader is closed'", async () => {
+      const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
+      const reader = await ZipReader.from(new BufferSource(zip));
+      await reader.close();
+      await expect(
+        (async () => {
+          for await (const _entry of reader) {
+            // should not reach here
+          }
+        })()
+      ).rejects.toThrow("ZipReader is closed");
+    });
+
+    it("ZipReader.close() is idempotent: source.close() called only once", async () => {
+      const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
+      const source = new ClosableBufferSource(zip);
+      const reader = await ZipReader.from(source);
+      await reader.close();
+      await reader.close(); // second call should be a no-op
+      expect(source.closeCallCount).toBe(1);
+    });
+
+    it("ZipReader.close() on source without close() does not throw", async () => {
+      const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
+      const reader = await ZipReader.from(new BufferSource(zip));
+      await reader.close();
+      await reader.close(); // no-op, BufferSource has no close()
+    });
+
+    it("entry.readable() stream errors when source is closed before reading", async () => {
+      const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
+      const source = new ClosableBufferSource(zip);
+      const reader = await ZipReader.from(source);
+
+      // Collect entries without reading their content
+      const entries: ZipEntry[] = [];
+      for await (const entry of reader) {
+        entries.push(entry);
+      }
+
+      // Close the reader (closes the source)
+      await reader.close();
+
+      // Now try to read an entry stream — the source is closed
+      const stream = entries[0].readable();
+      await expect(collectStream(stream)).rejects.toThrow("Source is closed");
+    });
+
+    it("source closed externally mid-iteration propagates error from iterator", async () => {
+      // Build a zip with two entries so the iterator makes more than one read
+      const encoder = new TextEncoder();
+      const file1 = encoder.encode("Hello");
+      const file2 = encoder.encode("World");
+      const name1 = encoder.encode("a.txt");
+      const name2 = encoder.encode("b.txt");
+
+      function localCrc32(data: Uint8Array): number {
+        let crc = ~0;
+        for (let i = 0; i < data.length; i++) {
+          crc ^= data[i];
+          for (let j = 0; j < 8; j++) {
+            crc = (crc >>> 1) ^ ((crc & 1) * 0xedb88320);
+          }
+        }
+        return ~crc >>> 0;
+      }
+
+      const crc1 = localCrc32(file1);
+      const crc2 = localCrc32(file2);
+
+      const lfh1 = new Uint8Array(30 + name1.length);
+      const lv1 = new DataView(lfh1.buffer);
+      lv1.setUint32(0, 0x04034b50, true);
+      lv1.setUint16(4, 20, true);
+      lv1.setUint32(14, crc1, true);
+      lv1.setUint32(18, file1.length, true);
+      lv1.setUint32(22, file1.length, true);
+      lv1.setUint16(26, name1.length, true);
+      lfh1.set(name1, 30);
+
+      const lfh2Offset = lfh1.length + file1.length;
+      const lfh2 = new Uint8Array(30 + name2.length);
+      const lv2 = new DataView(lfh2.buffer);
+      lv2.setUint32(0, 0x04034b50, true);
+      lv2.setUint16(4, 20, true);
+      lv2.setUint32(14, crc2, true);
+      lv2.setUint32(18, file2.length, true);
+      lv2.setUint32(22, file2.length, true);
+      lv2.setUint16(26, name2.length, true);
+      lfh2.set(name2, 30);
+
+      const cdOffset = lfh2Offset + lfh2.length + file2.length;
+
+      const cdh1 = new Uint8Array(46 + name1.length);
+      const cv1 = new DataView(cdh1.buffer);
+      cv1.setUint32(0, 0x02014b50, true);
+      cv1.setUint16(4, 45, true);
+      cv1.setUint16(6, 20, true);
+      cv1.setUint32(16, crc1, true);
+      cv1.setUint32(20, file1.length, true);
+      cv1.setUint32(24, file1.length, true);
+      cv1.setUint16(28, name1.length, true);
+      cv1.setUint32(42, 0, true);
+      cdh1.set(name1, 46);
+
+      const cdh2 = new Uint8Array(46 + name2.length);
+      const cv2 = new DataView(cdh2.buffer);
+      cv2.setUint32(0, 0x02014b50, true);
+      cv2.setUint16(4, 45, true);
+      cv2.setUint16(6, 20, true);
+      cv2.setUint32(16, crc2, true);
+      cv2.setUint32(20, file2.length, true);
+      cv2.setUint32(24, file2.length, true);
+      cv2.setUint16(28, name2.length, true);
+      cv2.setUint32(42, lfh2Offset, true);
+      cdh2.set(name2, 46);
+
+      const eocd = new Uint8Array(22);
+      const ev = new DataView(eocd.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, 2, true);
+      ev.setUint16(10, 2, true);
+      ev.setUint32(12, cdh1.length + cdh2.length, true);
+      ev.setUint32(16, cdOffset, true);
+
+      const total =
+        lfh1.length + file1.length + lfh2.length + file2.length +
+        cdh1.length + cdh2.length + eocd.length;
+      const zip = new Uint8Array(total);
+      let off = 0;
+      for (const part of [lfh1, file1, lfh2, file2, cdh1, cdh2, eocd]) {
+        zip.set(part, off);
+        off += part.length;
+      }
+
+      // Source that closes after one read (simulates external closure)
+      let readCount = 0;
+      const source: RandomAccessSource = {
+        size: zip.length,
+        async read(offset, length) {
+          readCount++;
+          if (readCount > 1) throw new Error("Source is closed");
+          return new BufferSource(zip).read(offset, length);
+        },
+      };
+
+      const reader = await ZipReader.from(source);
+      await expect(
+        (async () => {
+          for await (const _entry of reader) {
+            // The second CD chunk read will fail
+          }
+        })()
+      ).rejects.toThrow("Source is closed");
+    });
+
+    describe("FileSource closure", () => {
+      let tmpFile: string;
+
+      async function createTmpZip(): Promise<string> {
+        const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
+        const path = join(tmpdir(), `zip-reader-test-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+        await writeFile(path, zip);
+        return path;
+      }
+
+      it("FileSource.close() is idempotent", async () => {
+        tmpFile = await createTmpZip();
+        try {
+          const source = await FileSource.open(tmpFile);
+          await source.close();
+          await source.close(); // should not throw
+        } finally {
+          await unlink(tmpFile).catch(() => {});
+        }
+      });
+
+      it("FileSource.read() after close() throws 'Source is closed'", async () => {
+        tmpFile = await createTmpZip();
+        try {
+          const source = await FileSource.open(tmpFile);
+          await source.close();
+          await expect(source.read(0, 4)).rejects.toThrow("Source is closed");
+        } finally {
+          await unlink(tmpFile).catch(() => {});
+        }
+      });
+
+      it("ZipReader.from() fails gracefully when FileSource is closed before parsing", async () => {
+        tmpFile = await createTmpZip();
+        try {
+          const source = await FileSource.open(tmpFile);
+          await source.close();
+          await expect(ZipReader.from(source)).rejects.toThrow("Source is closed");
+        } finally {
+          await unlink(tmpFile).catch(() => {});
+        }
+      });
+
+      it("iteration fails gracefully when FileSource is closed after from()", async () => {
+        tmpFile = await createTmpZip();
+        try {
+          const source = await FileSource.open(tmpFile);
+          const reader = await ZipReader.from(source);
+          await source.close(); // close externally after reader is created
+          await expect(
+            (async () => {
+              for await (const _entry of reader) {
+                // CD read should fail
+              }
+            })()
+          ).rejects.toThrow("Source is closed");
+        } finally {
+          await unlink(tmpFile).catch(() => {});
+        }
+      });
+
+      it("entry stream fails gracefully when FileSource is closed before reading", async () => {
+        tmpFile = await createTmpZip();
+        try {
+          const source = await FileSource.open(tmpFile);
+          const reader = await ZipReader.from(source);
+          const entries: ZipEntry[] = [];
+          for await (const entry of reader) {
+            entries.push(entry);
+          }
+          await reader.close(); // closes the source
+          const stream = entries[0].readable();
+          await expect(collectStream(stream)).rejects.toThrow("Source is closed");
+        } finally {
+          await unlink(tmpFile).catch(() => {});
+        }
+      });
     });
   });
 

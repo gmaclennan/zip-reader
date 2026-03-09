@@ -1,5 +1,5 @@
 {
   "stream": {
-    "validateCrc32": false
+    "skipCrc32": true
   }
 }

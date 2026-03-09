@@ -1,23 +1,21 @@
 export interface ZipReaderOptions {
   /** Custom CRC32 function */
   crc32?: (data: Uint8Array, value?: number) => number;
-  /** Validate CRC32 checksums when streaming entry data. Default: true */
-  validateCrc32?: boolean;
-  /** Validate uncompressed entry sizes. Default: true */
-  validateEntrySizes?: boolean;
-  /** Validate filenames for dangerous paths. Default: true */
-  validateFilenames?: boolean;
+  /** Skip CRC32 checksums when streaming entry data. Default: false */
+  skipCrc32?: boolean;
+  /** Skip uncompressed entry size checks. Default: false */
+  skipSizeCheck?: boolean;
+  /** Skip filename validation for dangerous paths. Default: false */
+  skipFilenameValidation?: boolean;
   /**
-   * Require each entry to have a unique local file header offset. Default: true
+   * Skip checks for each Central Directory entry pointing to a unique Local
+   * File Header, which protects against overlapping ZIP bombs. Default: false
    *
-   * When true, rejects archives where multiple Central Directory entries point
-   * to the same Local File Header — the key technique in overlapping ZIP bombs.
-   *
-   * Set to false if the archive legitimately uses shared file data (e.g. tile
-   * maps with deduplicated tiles). In that case, callers should track total
-   * decompressed bytes themselves to guard against excessive output.
+   * Set to false if the archive legitimately uses duplicate entries. In that
+   * case, callers should track total decompressed bytes themselves to guard
+   * against excessive output.
    */
-  uniqueEntryOffsets?: boolean;
+  skipUniqueEntryCheck?: boolean;
   /** Factory for Mac OS Archive Utility support. Import from 'zip-reader/mac'. */
   macArchiveFactory?: MacArchiveFactory;
 }
@@ -32,10 +30,10 @@ export interface RandomAccessSource {
 }
 
 export interface ReadableOptions {
-  /** Decompress compressed entries. Default: true */
-  decompress?: boolean;
-  /** Validate CRC32 checksum. Default: true */
-  validateCrc32?: boolean;
+  /** Read raw entry data without decompression. Default: false */
+  rawEntry?: boolean;
+  /** Skip CRC32 checksum validation. Default: false */
+  skipCrc32?: boolean;
 }
 
 /** Internal parsed EOCD info */
@@ -90,7 +88,7 @@ export interface MacArchiveHandler {
   processEntry(
     entry: CdEntryInfo,
     entryIndex: number,
-    entryEnd: number
+    entryEnd: number,
   ): Promise<void>;
   validateLocalFileHeader(
     entry: CdEntryInfo,
@@ -98,11 +96,11 @@ export interface MacArchiveHandler {
     localCompressedSize: number,
     localUncompressedSize: number,
     filenameLength: number,
-    extraFieldsLength: number
+    extraFieldsLength: number,
   ): void;
 }
 
 export type MacArchiveFactory = (
   source: RandomAccessSource,
-  eocd: EocdInfo
+  eocd: EocdInfo,
 ) => MacArchiveHandler;

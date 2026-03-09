@@ -1,5 +1,5 @@
 {
   "zip": {
-    "validateEntrySizes": false
+    "skipSizeCheck": true
   }
 }

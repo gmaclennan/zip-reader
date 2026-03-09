@@ -8,7 +8,7 @@ import { FileSource } from "../src/sources/file.js";
 import type { RandomAccessSource } from "../src/types.js";
 
 async function collectStream(
-  stream: ReadableStream<Uint8Array>
+  stream: ReadableStream<Uint8Array>,
 ): Promise<Uint8Array> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
@@ -51,7 +51,7 @@ function buildZip(
     cdhFlags?: number;
     extraField?: Uint8Array;
     cdhExtraField?: Uint8Array;
-  }
+  },
 ): Uint8Array {
   const encoder = new TextEncoder();
   const nameBytes = encoder.encode(filename);
@@ -114,11 +114,16 @@ function buildZip(
   eocdView.setUint32(16, cdOffset, true);
   eocdView.setUint16(20, 0, true);
 
-  const zip = new Uint8Array(lfh.length + content.length + cdh.length + eocd.length);
+  const zip = new Uint8Array(
+    lfh.length + content.length + cdh.length + eocd.length,
+  );
   let offset = 0;
-  zip.set(lfh, offset); offset += lfh.length;
-  zip.set(content, offset); offset += content.length;
-  zip.set(cdh, offset); offset += cdh.length;
+  zip.set(lfh, offset);
+  offset += lfh.length;
+  zip.set(content, offset);
+  offset += content.length;
+  zip.set(cdh, offset);
+  offset += cdh.length;
   zip.set(eocd, offset);
 
   return zip;
@@ -136,13 +141,13 @@ describe("Edge cases and malformed ZIP handling", () => {
   describe("too-small source", () => {
     it("rejects source smaller than EOCD", async () => {
       await expect(
-        ZipReader.from(new BufferSource(new Uint8Array(10)))
+        ZipReader.from(new BufferSource(new Uint8Array(10))),
       ).rejects.toThrow("End of Central Directory Record not found");
     });
 
     it("rejects empty source", async () => {
       await expect(
-        ZipReader.from(new BufferSource(new Uint8Array(0)))
+        ZipReader.from(new BufferSource(new Uint8Array(0))),
       ).rejects.toThrow("End of Central Directory Record not found");
     });
   });
@@ -152,9 +157,9 @@ describe("Edge cases and malformed ZIP handling", () => {
       const data = new Uint8Array(22);
       // Wrong signature
       data[0] = 0x00;
-      await expect(
-        ZipReader.from(new BufferSource(data))
-      ).rejects.toThrow("End of Central Directory Record not found");
+      await expect(ZipReader.from(new BufferSource(data))).rejects.toThrow(
+        "End of Central Directory Record not found",
+      );
     });
 
     it("rejects multi-disk ZIP", async () => {
@@ -162,9 +167,9 @@ describe("Edge cases and malformed ZIP handling", () => {
       const view = new DataView(eocd.buffer);
       view.setUint32(0, 0x06054b50, true);
       view.setUint16(4, 1, true); // disk number = 1
-      await expect(
-        ZipReader.from(new BufferSource(eocd))
-      ).rejects.toThrow("Multi-disk ZIP files are not supported");
+      await expect(ZipReader.from(new BufferSource(eocd))).rejects.toThrow(
+        "Multi-disk ZIP files are not supported",
+      );
     });
 
     it("rejects entry count inconsistent with CD size", async () => {
@@ -172,10 +177,10 @@ describe("Edge cases and malformed ZIP handling", () => {
       const eocd = new Uint8Array(22);
       const view = new DataView(eocd.buffer);
       view.setUint32(0, 0x06054b50, true);
-      view.setUint16(8, 100, true);  // 100 entries
+      view.setUint16(8, 100, true); // 100 entries
       view.setUint16(10, 100, true); // 100 total entries
-      view.setUint32(12, 46, true);  // CD size = 46 (only fits 1 entry)
-      view.setUint32(16, 0, true);   // CD offset = 0
+      view.setUint32(12, 46, true); // CD size = 46 (only fits 1 entry)
+      view.setUint32(16, 0, true); // CD offset = 0
 
       // Need actual source bytes to cover the CD region
       const data = new Uint8Array(22 + 46);
@@ -188,12 +193,12 @@ describe("Edge cases and malformed ZIP handling", () => {
       fullView.setUint32(46, 0x06054b50, true);
       fullView.setUint16(46 + 8, 100, true);
       fullView.setUint16(46 + 10, 100, true);
-      fullView.setUint32(46 + 12, 46, true);  // CD size
-      fullView.setUint32(46 + 16, 0, true);    // CD offset
+      fullView.setUint32(46 + 12, 46, true); // CD size
+      fullView.setUint32(46 + 16, 0, true); // CD offset
 
-      await expect(
-        ZipReader.from(new BufferSource(full))
-      ).rejects.toThrow("Entry count is inconsistent with Central Directory size");
+      await expect(ZipReader.from(new BufferSource(full))).rejects.toThrow(
+        "Entry count is inconsistent with Central Directory size",
+      );
     });
 
     it("rejects CD that extends beyond EOCD", async () => {
@@ -203,11 +208,11 @@ describe("Edge cases and malformed ZIP handling", () => {
       view.setUint16(8, 1, true);
       view.setUint16(10, 1, true);
       view.setUint32(12, 100, true); // CD size much larger than file
-      view.setUint32(16, 0, true);   // CD offset = 0
+      view.setUint32(16, 0, true); // CD offset = 0
 
-      await expect(
-        ZipReader.from(new BufferSource(full))
-      ).rejects.toThrow("Central Directory extends beyond End of Central Directory Record");
+      await expect(ZipReader.from(new BufferSource(full))).rejects.toThrow(
+        "Central Directory extends beyond End of Central Directory Record",
+      );
     });
   });
 
@@ -230,7 +235,7 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Invalid Central Directory File Header signature");
     });
   });
@@ -244,7 +249,7 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Invalid characters in filename");
     });
 
@@ -262,7 +267,7 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Invalid characters in filename");
     });
 
@@ -274,19 +279,22 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Absolute path");
     });
 
     it("rejects directory traversal", async () => {
-      const zip = buildZip("../../../etc/passwd", new TextEncoder().encode("test"));
+      const zip = buildZip(
+        "../../../etc/passwd",
+        new TextEncoder().encode("test"),
+      );
       await expect(
         (async () => {
           const reader = await ZipReader.from(new BufferSource(zip));
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Relative path");
     });
 
@@ -298,14 +306,14 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Absolute path");
     });
 
     it("allows sloppy filenames when validation is disabled", async () => {
       const zip = buildZip("dir\\file.txt", new TextEncoder().encode("test"));
       const reader = await ZipReader.from(new BufferSource(zip), {
-        validateFilenames: false,
+        skipFilenameValidation: true,
       });
       const entries: ZipEntry[] = [];
       for await (const entry of reader) {
@@ -331,7 +339,7 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Strong encryption is not supported");
     });
 
@@ -361,7 +369,7 @@ describe("Edge cases and malformed ZIP handling", () => {
       for await (const entry of reader) {
         const stream = entry.readable();
         await expect(collectStream(stream)).rejects.toThrow(
-          "Invalid Local File Header signature"
+          "Invalid Local File Header signature",
         );
       }
     });
@@ -378,13 +386,13 @@ describe("Edge cases and malformed ZIP handling", () => {
       view.setUint32(cdOffset + 20, 999999, true);
 
       const reader = await ZipReader.from(new BufferSource(zip), {
-        validateCrc32: false,
-        validateEntrySizes: false,
+        skipCrc32: true,
+        skipSizeCheck: true,
       });
       for await (const entry of reader) {
         const stream = entry.readable();
         await expect(collectStream(stream)).rejects.toThrow(
-          "File data overflows file bounds"
+          "File data overflows file bounds",
         );
       }
     });
@@ -452,9 +460,9 @@ describe("Edge cases and malformed ZIP handling", () => {
 
       const reader = await ZipReader.from(new BufferSource(zip));
       for await (const entry of reader) {
-        const stream = entry.readable({ validateCrc32: true });
+        const stream = entry.readable();
         await expect(collectStream(stream)).rejects.toThrow(
-          "CRC32 validation failed"
+          "CRC32 validation failed",
         );
       }
     });
@@ -465,7 +473,7 @@ describe("Edge cases and malformed ZIP handling", () => {
       zip[30 + 8 + 2] ^= 0xff; // corrupt data
 
       const reader = await ZipReader.from(new BufferSource(zip), {
-        validateCrc32: false,
+        skipCrc32: true,
       });
       for await (const entry of reader) {
         const stream = entry.readable();
@@ -487,12 +495,12 @@ describe("Edge cases and malformed ZIP handling", () => {
       view.setUint32(cdOffset + 24, 3, true);
 
       const reader = await ZipReader.from(new BufferSource(zip), {
-        validateCrc32: false,
+        skipCrc32: true,
       });
       for await (const entry of reader) {
         const stream = entry.readable();
         await expect(collectStream(stream)).rejects.toThrow(
-          "Too many bytes in the stream"
+          "Too many bytes in the stream",
         );
       }
     });
@@ -533,7 +541,9 @@ describe("Edge cases and malformed ZIP handling", () => {
       const reader = await ZipReader.from(new BufferSource(zip));
       for await (const entry of reader) {
         expect(entry.isCompressed).toBe(true);
-        expect(() => entry.readable()).toThrow("Unsupported compression method");
+        expect(() => entry.readable()).toThrow(
+          "Unsupported compression method",
+        );
       }
     });
   });
@@ -613,8 +623,13 @@ describe("Edge cases and malformed ZIP handling", () => {
       eocdv.setUint32(16, cdOffset, true);
 
       const total =
-        lfh1.length + file1.length + lfh2.length + file2.length +
-        cdh1.length + cdh2.length + eocd.length;
+        lfh1.length +
+        file1.length +
+        lfh2.length +
+        file2.length +
+        cdh1.length +
+        cdh2.length +
+        eocd.length;
       const zip = new Uint8Array(total);
       let off = 0;
       for (const part of [lfh1, file1, lfh2, file2, cdh1, cdh2, eocd]) {
@@ -699,7 +714,8 @@ describe("Edge cases and malformed ZIP handling", () => {
       eocdv.setUint32(12, cdh1.length + cdh2.length, true);
       eocdv.setUint32(16, cdOffset, true);
 
-      const total = lfh.length + content.length + cdh1.length + cdh2.length + eocd.length;
+      const total =
+        lfh.length + content.length + cdh1.length + cdh2.length + eocd.length;
       const zip = new Uint8Array(total);
       let off = 0;
       for (const part of [lfh, content, cdh1, cdh2, eocd]) {
@@ -713,7 +729,7 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // iterate
           }
-        })()
+        })(),
       ).rejects.toThrow("Duplicate local file header offset detected");
     });
 
@@ -772,7 +788,8 @@ describe("Edge cases and malformed ZIP handling", () => {
       eocdv.setUint32(12, cdh1.length + cdh2.length, true);
       eocdv.setUint32(16, cdOffset, true);
 
-      const total = lfh.length + content.length + cdh1.length + cdh2.length + eocd.length;
+      const total =
+        lfh.length + content.length + cdh1.length + cdh2.length + eocd.length;
       const zip = new Uint8Array(total);
       let off = 0;
       for (const part of [lfh, content, cdh1, cdh2, eocd]) {
@@ -781,7 +798,7 @@ describe("Edge cases and malformed ZIP handling", () => {
       }
 
       const reader = await ZipReader.from(new BufferSource(zip), {
-        uniqueEntryOffsets: false,
+        skipUniqueEntryCheck: true,
       });
       const entries: ZipEntry[] = [];
       for await (const entry of reader) {
@@ -917,8 +934,13 @@ describe("Edge cases and malformed ZIP handling", () => {
       ev.setUint32(16, cdOffset, true);
 
       const total =
-        lfh1.length + file1.length + lfh2.length + file2.length +
-        cdh1.length + cdh2.length + eocd.length;
+        lfh1.length +
+        file1.length +
+        lfh2.length +
+        file2.length +
+        cdh1.length +
+        cdh2.length +
+        eocd.length;
       const zip = new Uint8Array(total);
       let off = 0;
       for (const part of [lfh1, file1, lfh2, file2, cdh1, cdh2, eocd]) {
@@ -943,7 +965,7 @@ describe("Edge cases and malformed ZIP handling", () => {
           for await (const _entry of reader) {
             // The second CD chunk read will fail
           }
-        })()
+        })(),
       ).rejects.toThrow("Source is closed");
     });
 
@@ -952,7 +974,10 @@ describe("Edge cases and malformed ZIP handling", () => {
 
       async function createTmpZip(): Promise<string> {
         const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
-        const path = join(tmpdir(), `zip-reader-test-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
+        const path = join(
+          tmpdir(),
+          `zip-reader-test-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`,
+        );
         await writeFile(path, zip);
         return path;
       }
@@ -984,7 +1009,9 @@ describe("Edge cases and malformed ZIP handling", () => {
         try {
           const source = await FileSource.open(tmpFile);
           await source.close();
-          await expect(ZipReader.from(source)).rejects.toThrow("Source is closed");
+          await expect(ZipReader.from(source)).rejects.toThrow(
+            "Source is closed",
+          );
         } finally {
           await unlink(tmpFile).catch(() => {});
         }
@@ -1001,7 +1028,7 @@ describe("Edge cases and malformed ZIP handling", () => {
               for await (const _entry of reader) {
                 // CD read should fail
               }
-            })()
+            })(),
           ).rejects.toThrow("Source is closed");
         } finally {
           await unlink(tmpFile).catch(() => {});
@@ -1019,7 +1046,9 @@ describe("Edge cases and malformed ZIP handling", () => {
           }
           await source.close(); // consumer closes the source directly
           const stream = entries[0].readable();
-          await expect(collectStream(stream)).rejects.toThrow("Source is closed");
+          await expect(collectStream(stream)).rejects.toThrow(
+            "Source is closed",
+          );
         } finally {
           await unlink(tmpFile).catch(() => {});
         }
@@ -1050,21 +1079,51 @@ describe("Edge cases and malformed ZIP handling", () => {
       const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
       const reader = await ZipReader.from(new BufferSource(zip));
       for await (const entry of reader) {
-        expect(() => { (entry as any).name = "hacked"; }).toThrow();
-        expect(() => { (entry as any).compressedSize = 999; }).toThrow();
-        expect(() => { (entry as any).uncompressedSize = 999; }).toThrow();
-        expect(() => { (entry as any).crc32 = 0; }).toThrow();
-        expect(() => { (entry as any).compressionMethod = 8; }).toThrow();
-        expect(() => { (entry as any).isDirectory = true; }).toThrow();
-        expect(() => { (entry as any).isCompressed = true; }).toThrow();
-        expect(() => { (entry as any).isEncrypted = true; }).toThrow();
-        expect(() => { (entry as any).zip64 = true; }).toThrow();
-        expect(() => { (entry as any).externalAttributes = 999; }).toThrow();
-        expect(() => { (entry as any).versionMadeBy = 999; }).toThrow();
-        expect(() => { (entry as any).generalPurposeBitFlag = 999; }).toThrow();
-        expect(() => { (entry as any).comment = "hacked"; }).toThrow();
-        expect(() => { (entry as any).lastModified = new Date(); }).toThrow();
-        expect(() => { (entry as any).extraFields = []; }).toThrow();
+        expect(() => {
+          (entry as any).name = "hacked";
+        }).toThrow();
+        expect(() => {
+          (entry as any).compressedSize = 999;
+        }).toThrow();
+        expect(() => {
+          (entry as any).uncompressedSize = 999;
+        }).toThrow();
+        expect(() => {
+          (entry as any).crc32 = 0;
+        }).toThrow();
+        expect(() => {
+          (entry as any).compressionMethod = 8;
+        }).toThrow();
+        expect(() => {
+          (entry as any).isDirectory = true;
+        }).toThrow();
+        expect(() => {
+          (entry as any).isCompressed = true;
+        }).toThrow();
+        expect(() => {
+          (entry as any).isEncrypted = true;
+        }).toThrow();
+        expect(() => {
+          (entry as any).zip64 = true;
+        }).toThrow();
+        expect(() => {
+          (entry as any).externalAttributes = 999;
+        }).toThrow();
+        expect(() => {
+          (entry as any).versionMadeBy = 999;
+        }).toThrow();
+        expect(() => {
+          (entry as any).generalPurposeBitFlag = 999;
+        }).toThrow();
+        expect(() => {
+          (entry as any).comment = "hacked";
+        }).toThrow();
+        expect(() => {
+          (entry as any).lastModified = new Date();
+        }).toThrow();
+        expect(() => {
+          (entry as any).extraFields = [];
+        }).toThrow();
         expect(entry.name).toBe("test.txt");
       }
     });

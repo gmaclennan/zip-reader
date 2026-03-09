@@ -123,7 +123,7 @@ describe("ZipReader", () => {
 
           const readerOptions: Record<string, any> = {};
           if (fixtureName === "sloppy-filenames") {
-            readerOptions.validateFilenames = false;
+            readerOptions.skipFilenameValidation = true;
           }
 
           // Skip content check for special fixtures
@@ -177,8 +177,8 @@ describe("ZipReader", () => {
 
             const streamOptions = fixtureOptions.stream || {};
             const stream = entry.readable({
-              decompress: streamOptions.decompress,
-              validateCrc32: streamOptions.validateCrc32,
+              rawEntry: streamOptions.decompress,
+              skipCrc32: streamOptions.validateCrc32,
             });
             const content = await collectStream(stream);
             const expected = expectedFiles[filename];
@@ -221,8 +221,8 @@ describe("ZipReader", () => {
           for await (const entry of zip) {
             const streamOptions = fixtureOptions.stream || {};
             const stream = entry.readable({
-              decompress: streamOptions.decompress,
-              validateCrc32: streamOptions.validateCrc32,
+              rawEntry: streamOptions.decompress,
+              skipCrc32: streamOptions.validateCrc32,
             });
             await collectStream(stream);
           }
@@ -241,7 +241,7 @@ describe("ZipReader", () => {
       const promise = (async () => {
         for await (const entry of zip) {
           if (entry.isDirectory) continue;
-          const stream = entry.readable({ validateCrc32: true });
+          const stream = entry.readable();
           await collectStream(stream);
         }
       })();
@@ -255,7 +255,7 @@ describe("ZipReader", () => {
 
       for await (const entry of zip) {
         if (entry.isDirectory) continue;
-        const stream = entry.readable({ validateCrc32: false });
+        const stream = entry.readable({ skipCrc32: true });
         await collectStream(stream);
       }
     });

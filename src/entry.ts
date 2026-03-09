@@ -100,8 +100,8 @@ export class ZipEntry {
    * before the first pull. Uses desiredSize for backpressure-aware chunking.
    */
   readable(options?: ReadableOptions): ReadableStream<Uint8Array> {
-    const decompress = options?.decompress ?? this.#isCompressed;
-    const validateCrc32 = options?.validateCrc32 ?? this.#ctx.validateCrc32;
+    const decompress = !(options?.rawEntry ?? !this.#isCompressed);
+    const validateCrc32 = !(options?.skipCrc32 ?? !this.#ctx.validateCrc32);
 
     if (this.#isEncrypted) {
       throw new Error("Decryption is not supported");

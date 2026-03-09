@@ -29,10 +29,10 @@ type ResolvedOptions = NormalizedZipReaderOptions & {
 
 const DEFAULT_OPTIONS: NormalizedZipReaderOptions = {
   crc32: defaultCrc32,
-  validateCrc32: true,
-  validateEntrySizes: true,
-  validateFilenames: true,
-  uniqueEntryOffsets: true,
+  skipCrc32: false,
+  skipSizeCheck: false,
+  skipFilenameValidation: false,
+  skipUniqueEntryCheck: false,
 };
 
 const INTERNAL = Symbol("Constructor only for internal use");
@@ -98,13 +98,13 @@ export class ZipReader {
       source: this.#source,
       centralDirectoryOffset: cd.centralDirectoryOffset,
       crc32: this.#opts.crc32,
-      validateCrc32: this.#opts.validateCrc32,
-      validateEntrySizes: this.#opts.validateEntrySizes,
+      validateCrc32: !this.#opts.skipCrc32,
+      validateEntrySizes: !this.#opts.skipSizeCheck,
       macArchiveHandler,
     };
 
     // Track seen file header offsets to detect overlapping entries (ZIP bomb technique)
-    const seenOffsets = this.#opts.uniqueEntryOffsets
+    const seenOffsets = !this.#opts.skipUniqueEntryCheck
       ? new Set<number>()
       : null;
 
@@ -112,7 +112,7 @@ export class ZipReader {
     for await (const { entry: entryInfo, entryEnd } of iterateCdEntries(
       this.#source,
       cd,
-      this.#opts.validateFilenames,
+      !this.#opts.skipFilenameValidation,
     )) {
       if (entryInfo.fileHeaderOffset + 30 > cd.centralDirectoryOffset) {
         if (!macArchiveHandler?.isMacArchive) {
@@ -140,5 +140,4 @@ export class ZipReader {
       entryIndex++;
     }
   }
-
 }

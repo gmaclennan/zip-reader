@@ -1,59 +1,39 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
 import { ZipReader, ZipEntry } from "../src/index.js";
-import { BufferSource } from "../src/sources/buffer.js";
 import { macArchive } from "../src/mac-archive.js";
+import {
+  openZipSource,
+  listZipFiles,
+  getExpectedFiles,
+  loadFixtureOptions,
+} from "./fixture-helpers.js";
 
-const FIXTURES_DIR = resolve(import.meta.dirname, "./fixtures");
-const SUCCESS_DIR = join(FIXTURES_DIR, "success");
-const FAILURE_DIR = join(FIXTURES_DIR, "failure");
-const BASIC_DIR = join(FIXTURES_DIR, "basic");
+const isBrowser = typeof window !== "undefined";
 
 async function collectStream(
   stream: ReadableStream<Uint8Array>,
 ): Promise<Uint8Array> {
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-function getExpectedFiles(dirPath: string): Record<string, Uint8Array | null> {
-  const files: Record<string, Uint8Array | null> = {};
-  if (!existsSync(dirPath)) return files;
-
-  function walk(dir: string, prefix: string): void {
-    const entries = readdirSync(dir);
-    for (const entry of entries) {
-      // Skip git placeholder files and test marker files
-      if (
-        entry === ".git_please_make_this_directory" ||
-        entry.startsWith(".dont_expect_")
-      )
-        continue;
-      const fullPath = join(dir, entry);
-      const relativePath = prefix ? `${prefix}/${entry}` : entry;
-      const stat = statSync(fullPath);
-      if (stat.isDirectory()) {
-        files[`${relativePath}/`] = null; // directory
-        walk(fullPath, relativePath);
-      } else {
-        files[relativePath] = new Uint8Array(readFileSync(fullPath));
-      }
-    }
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    totalLength += value.byteLength;
   }
-  walk(dirPath, "");
-  return files;
-}
-
-function loadFixtureOptions(zipPath: string): Record<string, any> {
-  const jsonPath = zipPath.replace(/\.zip$/, ".json");
-  if (existsSync(jsonPath)) {
-    return JSON.parse(readFileSync(jsonPath, "utf-8"));
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
   }
-  return {};
+  return result;
 }
 
-function fromBuffer(data: Uint8Array, options?: Record<string, any>) {
-  return ZipReader.from(new BufferSource(data), {
+async function fromFile(relPath: string, options?: Record<string, unknown>) {
+  const source = await openZipSource(relPath);
+  return ZipReader.from(source, {
     macArchiveFactory: macArchive,
     ...options,
   });
@@ -71,11 +51,14 @@ const SKIP_CONTENT_CHECK = new Set([
   "traditional-encryption-and-compression",
 ]);
 
+// Discover fixture files (top-level await, resolved before describe blocks run)
+const successZipFiles = await listZipFiles("success");
+const failureZipFiles = await listZipFiles("failure");
+
 describe("ZipReader", () => {
   describe("basic test", () => {
     it("reads a basic zip file", async () => {
-      const zipData = readFileSync(join(BASIC_DIR, "test.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("basic/test.zip");
 
       const entries: ZipEntry[] = [];
       for await (const entry of zip) {
@@ -94,29 +77,23 @@ describe("ZipReader", () => {
   });
 
   describe("success fixtures", () => {
-    const zipFiles = readdirSync(SUCCESS_DIR).filter((f) => f.endsWith(".zip"));
-
-    for (const zipFilename of zipFiles) {
-      const zipPath = join(SUCCESS_DIR, zipFilename);
-      const fixtureDir = zipPath.replace(/\.zip$/, "");
+    for (const zipFilename of successZipFiles) {
+      const zipRelPath = `success/${zipFilename}`;
+      const fixtureDirRel = `success/${zipFilename.replace(/\.zip$/, "")}`;
       const fixtureName = zipFilename.replace(/\.zip$/, "");
 
       describe(fixtureName, () => {
         it("reads all entries correctly", async () => {
-          const fixtureOptions = loadFixtureOptions(zipPath);
-          const zipData = readFileSync(zipPath);
+          const fixtureOptions = await loadFixtureOptions(zipRelPath);
 
-          const readerOptions: Record<string, any> = {};
+          const readerOptions: Record<string, unknown> = {};
           if (fixtureName === "sloppy-filenames") {
             readerOptions.skipFilenameValidation = true;
           }
 
           // Skip content check for special fixtures
           if (SKIP_CONTENT_CHECK.has(fixtureName)) {
-            const zip = await fromBuffer(
-              new Uint8Array(zipData),
-              readerOptions,
-            );
+            const zip = await fromFile(zipRelPath, readerOptions);
             const entries: ZipEntry[] = [];
             for await (const entry of zip) {
               entries.push(entry);
@@ -136,8 +113,8 @@ describe("ZipReader", () => {
             return;
           }
 
-          const zip = await fromBuffer(new Uint8Array(zipData), readerOptions);
-          const expectedFiles = getExpectedFiles(fixtureDir);
+          const zip = await fromFile(zipRelPath, readerOptions);
+          const expectedFiles = await getExpectedFiles(fixtureDirRel);
 
           let entryCount = 0;
           for await (const entry of zip) {
@@ -151,7 +128,8 @@ describe("ZipReader", () => {
 
             let filename = entry.name;
             // Handle renames from fixture options
-            for (const [from, to] of fixtureOptions.rename || []) {
+            for (const [from, to] of (fixtureOptions.rename as string[][]) ||
+              []) {
               filename = filename.replace(from, to);
             }
 
@@ -160,7 +138,8 @@ describe("ZipReader", () => {
               continue;
             }
 
-            const streamOptions = fixtureOptions.stream || {};
+            const streamOptions =
+              (fixtureOptions.stream as Record<string, boolean>) || {};
             const stream = entry.readable({
               rawEntry: streamOptions.decompress,
               skipCrc32: streamOptions.validateCrc32,
@@ -186,25 +165,23 @@ describe("ZipReader", () => {
   });
 
   describe("failure fixtures", () => {
-    const zipFiles = readdirSync(FAILURE_DIR).filter((f) => f.endsWith(".zip"));
-
-    for (const zipFilename of zipFiles) {
-      const zipPath = join(FAILURE_DIR, zipFilename);
+    for (const zipFilename of failureZipFiles) {
+      const zipRelPath = `failure/${zipFilename}`;
       // The filename encodes the expected error message, but with special
       // chars replaced (: → -, / → -, \ → -, + → -, > → -)
       const expectedErrorMessage = zipFilename.replace(/(_\d+)?\.zip$/, "");
 
       it(`throws on: ${expectedErrorMessage}`, async () => {
-        const fixtureOptions = loadFixtureOptions(zipPath);
-        const zipData = readFileSync(zipPath);
+        const fixtureOptions = await loadFixtureOptions(zipRelPath);
 
         const promise = (async () => {
-          const zip = await fromBuffer(
-            new Uint8Array(zipData),
-            fixtureOptions.zip,
+          const zip = await fromFile(
+            zipRelPath,
+            (fixtureOptions.zip as Record<string, unknown>) ?? {},
           );
           for await (const entry of zip) {
-            const streamOptions = fixtureOptions.stream || {};
+            const streamOptions =
+              (fixtureOptions.stream as Record<string, boolean>) || {};
             const stream = entry.readable({
               rawEntry: streamOptions.decompress,
               skipCrc32: streamOptions.validateCrc32,
@@ -220,8 +197,7 @@ describe("ZipReader", () => {
 
   describe("CRC32 validation", () => {
     it("detects wrong CRC32", async () => {
-      const zipData = readFileSync(join(SUCCESS_DIR, "crc32-wrong.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("success/crc32-wrong.zip");
 
       const promise = (async () => {
         for await (const entry of zip) {
@@ -235,8 +211,7 @@ describe("ZipReader", () => {
     });
 
     it("skips CRC32 validation when disabled", async () => {
-      const zipData = readFileSync(join(SUCCESS_DIR, "crc32-wrong.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("success/crc32-wrong.zip");
 
       for await (const entry of zip) {
         if (entry.isDirectory) continue;
@@ -248,8 +223,7 @@ describe("ZipReader", () => {
 
   describe("entry size validation", () => {
     it("detects size mismatches", async () => {
-      const zipData = readFileSync(join(SUCCESS_DIR, "wrong-entry-sizes.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("success/wrong-entry-sizes.zip");
 
       const promise = (async () => {
         for await (const entry of zip) {
@@ -265,8 +239,7 @@ describe("ZipReader", () => {
 
   describe("empty zip", () => {
     it("reads an empty zip with no entries", async () => {
-      const zipData = readFileSync(join(SUCCESS_DIR, "empty.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("success/empty.zip");
 
       const entries: ZipEntry[] = [];
       for await (const entry of zip) {
@@ -279,8 +252,7 @@ describe("ZipReader", () => {
 
   describe("zip64", () => {
     it("reads a zip64 file", async () => {
-      const zipData = readFileSync(join(SUCCESS_DIR, "zip64.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("success/zip64.zip");
 
       expect(zip.isZip64).toBe(true);
 
@@ -294,16 +266,14 @@ describe("ZipReader", () => {
 
   describe("properties", () => {
     it("exposes comment and isZip64", async () => {
-      const zipData = readFileSync(join(BASIC_DIR, "test.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("basic/test.zip");
 
       expect(zip.comment).toBeTypeOf("string");
       expect(zip.isZip64).toBeTypeOf("boolean");
     });
 
     it("exposes entry properties", async () => {
-      const zipData = readFileSync(join(BASIC_DIR, "test.zip"));
-      const zip = await fromBuffer(new Uint8Array(zipData));
+      const zip = await fromFile("basic/test.zip");
 
       for await (const entry of zip) {
         expect(entry.name).toBeTypeOf("string");
@@ -321,10 +291,13 @@ describe("ZipReader", () => {
     });
   });
 
-  describe("FileSource", () => {
+  describe.skipIf(isBrowser)("FileSource", () => {
     it("reads a zip via FileSource", async () => {
       const { FileSource } = await import("../src/sources/file.js");
-      const source = await FileSource.open(join(BASIC_DIR, "test.zip"));
+      const { resolve } = await import("node:path");
+      const source = await FileSource.open(
+        resolve(import.meta.dirname, "fixtures/basic/test.zip"),
+      );
       try {
         const zip = await ZipReader.from(source, {
           macArchiveFactory: macArchive,

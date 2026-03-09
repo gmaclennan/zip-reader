@@ -1,11 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { writeFile, unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { ZipReader, ZipEntry } from "../src/index.js";
 import { BufferSource } from "../src/sources/buffer.js";
-import { FileSource } from "../src/sources/file.js";
 import type { RandomAccessSource } from "../src/types.js";
+
+const isBrowser = typeof window !== "undefined";
 
 async function collectStream(
   stream: ReadableStream<Uint8Array>,
@@ -969,10 +967,13 @@ describe("Edge cases and malformed ZIP handling", () => {
       ).rejects.toThrow("Source is closed");
     });
 
-    describe("FileSource closure", () => {
+    describe.skipIf(isBrowser)("FileSource closure", () => {
       let tmpFile: string;
 
       async function createTmpZip(): Promise<string> {
+        const { writeFile } = await import("node:fs/promises");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
         const zip = buildZip("test.txt", new TextEncoder().encode("hello"));
         const path = join(
           tmpdir(),
@@ -982,29 +983,37 @@ describe("Edge cases and malformed ZIP handling", () => {
         return path;
       }
 
+      async function cleanup(path: string): Promise<void> {
+        const { unlink } = await import("node:fs/promises");
+        await unlink(path).catch(() => {});
+      }
+
       it("FileSource.close() is idempotent", async () => {
+        const { FileSource } = await import("../src/sources/file.js");
         tmpFile = await createTmpZip();
         try {
           const source = await FileSource.open(tmpFile);
           await source.close();
           await source.close(); // should not throw
         } finally {
-          await unlink(tmpFile).catch(() => {});
+          await cleanup(tmpFile);
         }
       });
 
       it("FileSource.read() after close() throws 'Source is closed'", async () => {
+        const { FileSource } = await import("../src/sources/file.js");
         tmpFile = await createTmpZip();
         try {
           const source = await FileSource.open(tmpFile);
           await source.close();
           await expect(source.read(0, 4)).rejects.toThrow("Source is closed");
         } finally {
-          await unlink(tmpFile).catch(() => {});
+          await cleanup(tmpFile);
         }
       });
 
       it("ZipReader.from() fails gracefully when FileSource is closed before parsing", async () => {
+        const { FileSource } = await import("../src/sources/file.js");
         tmpFile = await createTmpZip();
         try {
           const source = await FileSource.open(tmpFile);
@@ -1013,11 +1022,12 @@ describe("Edge cases and malformed ZIP handling", () => {
             "Source is closed",
           );
         } finally {
-          await unlink(tmpFile).catch(() => {});
+          await cleanup(tmpFile);
         }
       });
 
       it("iteration fails gracefully when FileSource is closed after from()", async () => {
+        const { FileSource } = await import("../src/sources/file.js");
         tmpFile = await createTmpZip();
         try {
           const source = await FileSource.open(tmpFile);
@@ -1031,11 +1041,12 @@ describe("Edge cases and malformed ZIP handling", () => {
             })(),
           ).rejects.toThrow("Source is closed");
         } finally {
-          await unlink(tmpFile).catch(() => {});
+          await cleanup(tmpFile);
         }
       });
 
       it("entry stream fails gracefully when FileSource is closed before reading", async () => {
+        const { FileSource } = await import("../src/sources/file.js");
         tmpFile = await createTmpZip();
         try {
           const source = await FileSource.open(tmpFile);
@@ -1050,7 +1061,7 @@ describe("Edge cases and malformed ZIP handling", () => {
             "Source is closed",
           );
         } finally {
-          await unlink(tmpFile).catch(() => {});
+          await cleanup(tmpFile);
         }
       });
     });

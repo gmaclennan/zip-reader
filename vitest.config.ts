@@ -1,6 +1,12 @@
 import { defineConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
 import type { BrowserInstanceOption } from "vitest/node";
+import {
+  listZipFiles,
+  readFileAsBase64,
+  getExpectedFilesData,
+  loadFixtureOptionsCmd,
+} from "./test/commands.js";
 
 const browserInstances: BrowserInstanceOption[] = [{ browser: "chromium" }];
 
@@ -43,7 +49,10 @@ export default defineConfig({
         },
         test: {
           name: "browser",
-          include: ["test/browser.test.ts"],
+          include: [
+            "test/zip-reader.test.ts",
+            "test/edge-cases.test.ts",
+          ],
           exclude: ["**/node_modules/**", "**/.git/**", "vendor/**"],
           alias: {
             "#crc32": "/src/crc-browser.ts",
@@ -55,6 +64,12 @@ export default defineConfig({
             headless: true,
             provider: playwright(),
             instances: browserInstances,
+            commands: {
+              listZipFiles,
+              readFileAsBase64,
+              getExpectedFilesData,
+              loadFixtureOptionsCmd,
+            },
           },
         },
       },

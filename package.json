@@ -27,6 +27,10 @@
     "#crc32": {
       "browser": "./dist/crc-browser.js",
       "default": "./dist/crc-node.js"
+    },
+    "#deflate-raw": {
+      "browser": "./dist/deflate-raw-browser.js",
+      "default": "./dist/deflate-raw-node.js"
     }
   },
   "type": "module",
@@ -76,7 +80,7 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.7",
     "yauzl-promise": "^4.0.0",
-    "zip-writer": "^2.1.1"
+    "zip-writer": "^2.2.0"
   },
   "lint-staged": {
     "*.js": "eslint --cache --fix",

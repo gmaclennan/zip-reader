@@ -13,6 +13,7 @@ import type {
 } from "./types.js";
 import { readFields, dosDateTimeToDate } from "./utils.js";
 import { LFH_FIELDS } from "./zip-records.js";
+import { createDeflateRawDecompressionStream } from "#deflate-raw";
 
 const QUEUING_STRATEGY = new ByteLengthQueuingStrategy({
   highWaterMark: 65536,
@@ -210,12 +211,7 @@ export class ZipEntry {
     let stream: ReadableStream<Uint8Array> = rawStream;
 
     if (decompress) {
-      stream = stream.pipeThrough(
-        new DecompressionStream("deflate-raw") as TransformStream<
-          Uint8Array,
-          Uint8Array
-        >,
-      );
+      stream = stream.pipeThrough(createDeflateRawDecompressionStream());
     }
 
     // Validate size and/or CRC32 on decompressed data in a single transform

@@ -21,6 +21,10 @@ if (process.platform !== "win32") {
 }
 
 export default defineConfig({
+  server: {
+    // Node 18 on Windows doesn't support listening on IPv6 ::1
+    host: "127.0.0.1",
+  },
   test: {
     reporters: process.env.CI ? ["verbose"] : ["default"],
     coverage: {
@@ -37,25 +41,29 @@ export default defineConfig({
           name: "node",
           environment: "node",
           include: ["test/**/*.test.ts"],
-          exclude: ["test/browser.test.ts", "**/node_modules/**", "**/.git/**", "vendor/**"],
+          exclude: [
+            "test/browser.test.ts",
+            "**/node_modules/**",
+            "**/.git/**",
+            "vendor/**",
+          ],
           alias: {
             "#crc32": "/src/crc-node.ts",
+            "#deflate-raw": "/src/deflate-raw-node.ts",
           },
         },
       },
       {
         optimizeDeps: {
-          exclude: ["execa", "node:zlib", "zlib"],
+          exclude: ["execa", "node:zlib", "zlib", "node:stream"],
         },
         test: {
           name: "browser",
-          include: [
-            "test/zip-reader.test.ts",
-            "test/edge-cases.test.ts",
-          ],
+          include: ["test/zip-reader.test.ts", "test/edge-cases.test.ts"],
           exclude: ["**/node_modules/**", "**/.git/**", "vendor/**"],
           alias: {
             "#crc32": "/src/crc-browser.ts",
+            "#deflate-raw": "/src/deflate-raw-browser.ts",
           },
           browser: {
             ui: false,

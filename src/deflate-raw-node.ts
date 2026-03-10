@@ -1,6 +1,4 @@
-// @ts-expect-error - TS is configured to target DOM, not node
 import { createInflateRaw } from "node:zlib";
-// @ts-expect-error - TS is configured to target DOM, not node
 import { Duplex } from "node:stream";
 
 let nativeSupported: boolean;

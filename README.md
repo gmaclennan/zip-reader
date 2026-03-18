@@ -190,10 +190,10 @@ Create a `ZipReader` from a `RandomAccessSource`.
 
 ```ts
 const zip = await ZipReader.from(source, {
-  validateCrc32: true, // default
-  validateEntrySizes: true, // default
-  validateFilenames: true, // default
-  uniqueEntryOffsets: true, // default
+  skipCrc32: false, // default
+  skipSizeCheck: false, // default
+  skipFilenameValidation: false, // default
+  skipUniqueEntryCheck: false, // default
   macArchiveFactory: macArchive, // optional, import from "@gmaclennan/zip-reader/mac"
 });
 ```
@@ -252,9 +252,10 @@ decompressed and CRC32 is validated.
 
 **Parameters:**
 
-- `options.decompress?: boolean` - Decompress the data (default: `true` for
-  compressed entries)
-- `options.validateCrc32?: boolean` - Validate CRC32 checksum (default: `true`)
+- `options.rawEntry?: boolean` - Read raw entry data without decompression
+  (default: `false`)
+- `options.skipCrc32?: boolean` - Skip CRC32 checksum validation (default:
+  `false`)
 
 **Returns:** `ReadableStream<Uint8Array>`
 
@@ -263,10 +264,10 @@ decompressed and CRC32 is validated.
 const stream = entry.readable();
 
 // Read raw compressed data
-const rawStream = entry.readable({ decompress: false });
+const rawStream = entry.readable({ rawEntry: true });
 
 // Skip CRC32 validation
-const fastStream = entry.readable({ validateCrc32: false });
+const fastStream = entry.readable({ skipCrc32: true });
 ```
 
 **Example — read entry to string:**
@@ -303,17 +304,16 @@ for await (const entry of zip) {
 - `crc32?: (data: Uint8Array, value?: number) => number` - Custom CRC32
   function. Defaults to `zlib.crc32` on Node.js and a pure JavaScript
   implementation in browsers.
-- `validateCrc32?: boolean` - Validate CRC32 checksums when streaming entry
-  data. Default: `true`
-- `validateEntrySizes?: boolean` - Validate uncompressed entry sizes. Default:
-  `true`
-- `validateFilenames?: boolean` - Validate filenames for dangerous paths
-  (absolute paths, `..` traversal). Default: `true`
-- `uniqueEntryOffsets?: boolean` - Require each entry to have a unique local
-  file header offset. Rejects archives where multiple Central Directory entries
-  point to the same Local File Header — the key technique in overlapping ZIP
-  bombs. Set to `false` for archives that legitimately share file data (e.g.
-  tile maps with deduplicated tiles). Default: `true`
+- `skipCrc32?: boolean` - Skip CRC32 checksums when streaming entry data.
+  Default: `false`
+- `skipSizeCheck?: boolean` - Skip uncompressed entry size checks. Default:
+  `false`
+- `skipFilenameValidation?: boolean` - Skip filename validation for dangerous
+  paths (absolute paths, `..` traversal). Default: `false`
+- `skipUniqueEntryCheck?: boolean` - Skip checks for each Central Directory
+  entry pointing to a unique Local File Header. Protects against overlapping ZIP
+  bombs. Set to `true` for archives that legitimately share file data (e.g. tile
+  maps with deduplicated tiles). Default: `false`
 - `macArchiveFactory?: MacArchiveFactory` - Factory for Mac OS Archive Utility
   support. Import from `"@gmaclennan/zip-reader/mac"`.
 
@@ -340,18 +340,18 @@ open an issue.
 
 ### Handled by default
 
-| Category                            | What's checked                                                                        | Details                                                                                                                                                                   |
-| ----------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Path traversal**                  | Rejects `..` segments, absolute paths, backslashes, Windows drive letters, null bytes | Prevents directory escape and path truncation attacks. Disable with `validateFilenames: false`.                                                                           |
-| **ZIP bombs (overlapping entries)** | Rejects multiple CD entries pointing to the same local file header                    | Detects the [overlapping file data](https://www.bamsoftware.com/hacks/zipbomb/) technique. Disable with `uniqueEntryOffsets: false` for legitimate use cases (see below). |
-| **ZIP bombs (size mismatch)**       | Validates decompressed output against declared `uncompressedSize`                     | A single entry cannot silently decompress to more than its declared size. Disable with `validateEntrySizes: false`.                                                       |
-| **CRC32 validation**                | Validates checksum on decompressed data                                               | Catches corruption and tampered content. Disable with `validateCrc32: false`.                                                                                             |
-| **Structural consistency**          | Entry count vs. Central Directory size, CD bounds vs. EOCD offset                     | Rejects archives where the EOCD metadata is internally inconsistent, catching malformed files early.                                                                      |
-| **ZIP64 safe integers**             | Rejects 64-bit values above `Number.MAX_SAFE_INTEGER`                                 | Prevents silent precision loss that could cause incorrect offsets or sizes.                                                                                               |
-| **Source bounds checking**          | All built-in sources validate read offsets                                            | Throws a clear `RangeError` rather than returning silently short data.                                                                                                    |
-| **Strong encryption**               | Rejected at parse time                                                                | Throws rather than returning garbage data.                                                                                                                                |
-| **Multi-disk archives**             | Rejected at parse time                                                                | Not supported; detected and rejected cleanly.                                                                                                                             |
-| **Mac OS Archive Utility**          | Detects and corrects truncated 32-bit values                                          | Mac's built-in archiver creates non-conformant ZIPs with truncated sizes, offsets, and entry counts. Opt-in via `macArchiveFactory` option.                               |
+| Category                            | What's checked                                                                        | Details                                                                                                                                                                    |
+| ----------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Path traversal**                  | Rejects `..` segments, absolute paths, backslashes, Windows drive letters, null bytes | Prevents directory escape and path truncation attacks. Disable with `skipFilenameValidation: true`.                                                                        |
+| **ZIP bombs (overlapping entries)** | Rejects multiple CD entries pointing to the same local file header                    | Detects the [overlapping file data](https://www.bamsoftware.com/hacks/zipbomb/) technique. Disable with `skipUniqueEntryCheck: true` for legitimate use cases (see below). |
+| **ZIP bombs (size mismatch)**       | Validates decompressed output against declared `uncompressedSize`                     | A single entry cannot silently decompress to more than its declared size. Disable with `skipSizeCheck: true`.                                                              |
+| **CRC32 validation**                | Validates checksum on decompressed data                                               | Catches corruption and tampered content. Disable with `skipCrc32: true`.                                                                                                   |
+| **Structural consistency**          | Entry count vs. Central Directory size, CD bounds vs. EOCD offset                     | Rejects archives where the EOCD metadata is internally inconsistent, catching malformed files early.                                                                       |
+| **ZIP64 safe integers**             | Rejects 64-bit values above `Number.MAX_SAFE_INTEGER`                                 | Prevents silent precision loss that could cause incorrect offsets or sizes.                                                                                                |
+| **Source bounds checking**          | All built-in sources validate read offsets                                            | Throws a clear `RangeError` rather than returning silently short data.                                                                                                     |
+| **Strong encryption**               | Rejected at parse time                                                                | Throws rather than returning garbage data.                                                                                                                                 |
+| **Multi-disk archives**             | Rejected at parse time                                                                | Not supported; detected and rejected cleanly.                                                                                                                              |
+| **Mac OS Archive Utility**          | Detects and corrects truncated 32-bit values                                          | Mac's built-in archiver creates non-conformant ZIPs with truncated sizes, offsets, and entry counts. Opt-in via `macArchiveFactory` option.                                |
 
 ### What this library does _not_ do
 

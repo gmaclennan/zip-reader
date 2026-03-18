@@ -84,6 +84,9 @@ export class ZipEntry {
   get versionMadeBy(): number {
     return this.#info.versionMadeBy;
   }
+  get fileHeaderOffset(): number {
+    return this.#info.fileHeaderOffset;
+  }
   get generalPurposeBitFlag(): number {
     return this.#info.generalPurposeBitFlag;
   }

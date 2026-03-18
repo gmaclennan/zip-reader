@@ -237,6 +237,7 @@ Represents a single entry in the ZIP archive.
 - `isCompressed: boolean` - Whether this entry is compressed
 - `isEncrypted: boolean` - Whether this entry is encrypted
 - `zip64: boolean` - Whether this entry uses ZIP64 format
+- `fileHeaderOffset: number` - Offset of the local file header in the archive
 - `externalAttributes: number` - External file attributes
 - `versionMadeBy: number` - Version made by field
 - `generalPurposeBitFlag: number` - General purpose bit flag

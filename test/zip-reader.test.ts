@@ -286,6 +286,7 @@ describe("ZipReader", () => {
         expect(entry.isCompressed).toBeTypeOf("boolean");
         expect(entry.isEncrypted).toBeTypeOf("boolean");
         expect(entry.zip64).toBeTypeOf("boolean");
+        expect(entry.fileHeaderOffset).toBeTypeOf("number");
         break; // just check first entry
       }
     });

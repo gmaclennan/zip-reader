@@ -14,7 +14,7 @@ export class FileSource implements RandomAccessSource {
 
   static async open(path: string): Promise<FileSource> {
     const handle = await open(path, "r");
-    const stats = await stat(path);
+    const stats = await handle.stat();
     return new FileSource(handle, stats.size);
   }
 
@@ -24,7 +24,7 @@ export class FileSource implements RandomAccessSource {
     }
     if (offset < 0 || offset + length > this.size) {
       throw new RangeError(
-        `Read out of bounds: offset=${offset} length=${length} size=${this.size}`
+        `Read out of bounds: offset=${offset} length=${length} size=${this.size}`,
       );
     }
     const buffer = new Uint8Array(length);

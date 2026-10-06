@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
 import { ZipReader, ZipEntry } from "../src/index.js";
 import { BufferSource } from "../src/sources/buffer.js";
 import type { RandomAccessSource } from "../src/types.js";
@@ -50,7 +50,7 @@ function buildZip(
     extraField?: Uint8Array;
     cdhExtraField?: Uint8Array;
   },
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const encoder = new TextEncoder();
   const nameBytes = encoder.encode(filename);
   const crc = crc32(content);
@@ -128,7 +128,7 @@ function buildZip(
 }
 
 /** Build a minimal empty ZIP (just EOCD, 0 entries) */
-function buildEmptyZip(): Uint8Array {
+function buildEmptyZip(): Uint8Array<ArrayBuffer> {
   const eocd = new Uint8Array(22);
   const view = new DataView(eocd.buffer);
   view.setUint32(0, 0x06054b50, true);
@@ -405,6 +405,12 @@ describe("Edge cases and malformed ZIP handling", () => {
     it("BufferSource rejects negative offset", async () => {
       const source = new BufferSource(new Uint8Array(10));
       await expect(source.read(-1, 5)).rejects.toThrow("Read out of bounds");
+    });
+
+    it("BufferSource types exclude SharedArrayBuffer data", () => {
+      expectTypeOf(BufferSource).constructorParameters.toEqualTypeOf<
+        [Uint8Array<ArrayBuffer> | ArrayBuffer]
+      >();
     });
 
     it("BufferSource allows valid reads", async () => {
@@ -820,13 +826,16 @@ describe("Edge cases and malformed ZIP handling", () => {
       readonly #inner: BufferSource;
       #closed = false;
 
-      constructor(data: Uint8Array) {
+      constructor(data: Uint8Array<ArrayBuffer>) {
         this.#inner = new BufferSource(data);
       }
       get size() {
         return this.#inner.size;
       }
-      async read(offset: number, length: number): Promise<Uint8Array> {
+      async read(
+        offset: number,
+        length: number,
+      ): Promise<Uint8Array<ArrayBuffer>> {
         if (this.#closed) throw new Error("Source is closed");
         return this.#inner.read(offset, length);
       }

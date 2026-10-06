@@ -21,8 +21,11 @@ export interface ZipReaderOptions {
 }
 
 export interface RandomAccessSource {
-  /** Read `length` bytes starting at `offset` */
-  read(offset: number, length: number): Promise<Uint8Array>;
+  /**
+   * Read `length` bytes starting at `offset`. The data must not be backed by a
+   * `SharedArrayBuffer`, which browsers' `DecompressionStream` rejects.
+   */
+  read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>;
   /** Total size of the source in bytes */
   readonly size: number;
   /** Optional cleanup */

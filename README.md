@@ -55,7 +55,8 @@ imports to keep the main bundle small.
 
 ### `BufferSource`
 
-Wraps a `Uint8Array` or `ArrayBuffer` for in-memory ZIP reading.
+Wraps a `Uint8Array` or `ArrayBuffer` for in-memory ZIP reading. Data backed by
+a `SharedArrayBuffer` is not supported.
 
 ```ts
 import { BufferSource } from "@gmaclennan/zip-reader/buffer-source";
@@ -139,7 +140,7 @@ class HttpRangeSource implements RandomAccessSource {
     this.size = size;
   }
 
-  async read(offset: number, length: number): Promise<Uint8Array> {
+  async read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> {
     const response = await fetch(this.#url, {
       headers: { Range: `bytes=${offset}-${offset + length - 1}` },
     });
@@ -241,11 +242,11 @@ Represents a single entry in the ZIP archive.
 - `externalAttributes: number` - External file attributes
 - `versionMadeBy: number` - Version made by field
 - `generalPurposeBitFlag: number` - General purpose bit flag
-- `extraFields: ReadonlyArray<{ id: number; data: Uint8Array }>` - Extra fields
+- `extraFields: ReadonlyArray<{ id: number; data: Uint8Array<ArrayBuffer> }>` - Extra fields
 
 #### Methods
 
-##### `readable(options?): ReadableStream<Uint8Array>`
+##### `readable(options?): ReadableStream<Uint8Array<ArrayBuffer>>`
 
 Get a `ReadableStream` of the entry's data. By default, compressed entries are
 decompressed and CRC32 is validated.
@@ -257,7 +258,7 @@ decompressed and CRC32 is validated.
 - `options.skipCrc32?: boolean` - Skip CRC32 checksum validation (default:
   `false`)
 
-**Returns:** `ReadableStream<Uint8Array>`
+**Returns:** `ReadableStream<Uint8Array<ArrayBuffer>>`
 
 ```ts
 // Read decompressed data (default)
@@ -327,8 +328,8 @@ Interface for providing random access to ZIP data.
 
 **Methods:**
 
-- `read(offset: number, length: number): Promise<Uint8Array>` - Read `length`
-  bytes starting at `offset`
+- `read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>` -
+  Read `length` bytes starting at `offset`.
 - `close?(): Promise<void>` - Optional cleanup
 
 ## Safety and edge-case handling

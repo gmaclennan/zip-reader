@@ -2,15 +2,18 @@ import type { RandomAccessSource } from "../types.js";
 
 export class BufferSource implements RandomAccessSource {
   readonly size: number;
-  readonly #data: Uint8Array;
+  readonly #data: Uint8Array<ArrayBuffer>;
 
-  constructor(data: Uint8Array | ArrayBuffer) {
+  constructor(data: Uint8Array<ArrayBuffer> | ArrayBuffer) {
     this.#data =
       data instanceof ArrayBuffer ? new Uint8Array(data) : data;
     this.size = this.#data.byteLength;
   }
 
-  async read(offset: number, length: number): Promise<Uint8Array> {
+  async read(
+    offset: number,
+    length: number,
+  ): Promise<Uint8Array<ArrayBuffer>> {
     if (offset < 0 || offset + length > this.size) {
       throw new RangeError(
         `Read out of bounds: offset=${offset} length=${length} size=${this.size}`

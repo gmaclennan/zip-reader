@@ -37,7 +37,7 @@
   "scripts": {
     "test": "run-s test:types test:lint test:vitest",
     "prepare": "husky",
-    "test:types": "tsc --noEmit",
+    "test:types": "tsc --noEmit && tsc -p tsconfig.node.json",
     "test:lint": "eslint",
     "test:vitest": "vitest",
     "bench": "vitest bench --project node",

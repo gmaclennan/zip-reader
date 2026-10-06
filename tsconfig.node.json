@@ -4,7 +4,12 @@
     "types": ["node"],
     "typeRoots": ["./node_modules/@types"],
     "noEmit": true,
-    "rootDir": "."
+    "rootDir": ".",
+    // rootDir "." stops TypeScript mapping the dist/ targets of package imports back to src/
+    "paths": {
+      "#crc32": ["./src/crc-node.ts"],
+      "#deflate-raw": ["./src/deflate-raw-node.ts"]
+    }
   },
   "include": ["vitest.config.ts", "test/**/*.ts"]
 }

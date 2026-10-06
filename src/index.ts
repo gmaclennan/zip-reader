@@ -83,6 +83,8 @@ export class ZipReader {
 
     const resolvedOptions = {
       ...normalizedOptions,
+      // Object.assign lets an explicit `crc32: undefined` replace the default
+      crc32: options?.crc32 ?? defaultCrc32,
       macArchiveHandler,
     };
 

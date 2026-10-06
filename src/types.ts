@@ -11,7 +11,7 @@ export interface ZipReaderOptions {
    * Skip checks for each Central Directory entry pointing to a unique Local
    * File Header, which protects against overlapping ZIP bombs. Default: false
    *
-   * Set to false if the archive legitimately uses duplicate entries. In that
+   * Set to true if the archive legitimately uses duplicate entries. In that
    * case, callers should track total decompressed bytes themselves to guard
    * against excessive output.
    */

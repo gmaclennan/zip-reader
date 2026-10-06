@@ -237,6 +237,29 @@ describe("ZipReader", () => {
     });
   });
 
+  describe("options", () => {
+    it("uses the default crc32 when crc32 is undefined", async () => {
+      const zip = await fromFile("basic/test.zip", { crc32: undefined });
+
+      for await (const entry of zip) {
+        if (entry.isDirectory) continue;
+        await collectStream(entry.readable());
+      }
+    });
+
+    it("reads stored entries with rawEntry: false", async () => {
+      const zip = await fromFile("basic/test.zip");
+
+      let storedEntries = 0;
+      for await (const entry of zip) {
+        if (entry.isDirectory || entry.isCompressed) continue;
+        storedEntries++;
+        await collectStream(entry.readable({ rawEntry: false }));
+      }
+      expect(storedEntries).toBeGreaterThan(0);
+    });
+  });
+
   describe("empty zip", () => {
     it("reads an empty zip with no entries", async () => {
       const zip = await fromFile("success/empty.zip");

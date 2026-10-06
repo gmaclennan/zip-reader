@@ -10,17 +10,17 @@ try {
 }
 
 export function createDeflateRawDecompressionStream(): TransformStream<
-  Uint8Array,
-  Uint8Array
+  Uint8Array<ArrayBuffer>,
+  Uint8Array<ArrayBuffer>
 > {
   if (nativeSupported) {
     return new DecompressionStream("deflate-raw") as TransformStream<
-      Uint8Array,
-      Uint8Array
+      Uint8Array<ArrayBuffer>,
+      Uint8Array<ArrayBuffer>
     >;
   }
   return Duplex.toWeb(createInflateRaw()) as unknown as TransformStream<
-    Uint8Array,
-    Uint8Array
+    Uint8Array<ArrayBuffer>,
+    Uint8Array<ArrayBuffer>
   >;
 }

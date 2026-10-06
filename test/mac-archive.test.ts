@@ -51,7 +51,7 @@ function getExpectedFiles(dirPath: string): Record<string, Uint8Array | null> {
   return files;
 }
 
-function fromBuffer(data: Uint8Array) {
+function fromBuffer(data: Uint8Array<ArrayBuffer>) {
   return ZipReader.from(new BufferSource(data), {
     macArchiveFactory: macArchive,
   });

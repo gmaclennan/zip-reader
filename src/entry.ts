@@ -90,7 +90,10 @@ export class ZipEntry {
   get generalPurposeBitFlag(): number {
     return this.#info.generalPurposeBitFlag;
   }
-  get extraFields(): ReadonlyArray<{ id: number; data: Uint8Array }> {
+  get extraFields(): ReadonlyArray<{
+    id: number;
+    data: Uint8Array<ArrayBuffer>;
+  }> {
     return this.#info.extraFields.map((f) => ({
       id: f.id,
       data: f.data.slice(),
@@ -103,7 +106,7 @@ export class ZipEntry {
    * Reads the Local File Header in start() to resolve the data offset
    * before the first pull. Uses desiredSize for backpressure-aware chunking.
    */
-  readable(options?: ReadableOptions): ReadableStream<Uint8Array> {
+  readable(options?: ReadableOptions): ReadableStream<Uint8Array<ArrayBuffer>> {
     const decompress = this.#isCompressed && !options?.rawEntry;
     const validateCrc32 = !(options?.skipCrc32 ?? !this.#ctx.validateCrc32);
 
@@ -127,7 +130,7 @@ export class ZipEntry {
     let fileDataOffset = 0;
     let bytesRead = 0;
 
-    const rawStream = new ReadableStream<Uint8Array>(
+    const rawStream = new ReadableStream<Uint8Array<ArrayBuffer>>(
       {
         async start(controller) {
           const lfhData = await ctx.source.read(
@@ -211,7 +214,7 @@ export class ZipEntry {
     );
 
     // Build transform pipeline
-    let stream: ReadableStream<Uint8Array> = rawStream;
+    let stream: ReadableStream<Uint8Array<ArrayBuffer>> = rawStream;
 
     if (decompress) {
       stream = stream.pipeThrough(createDeflateRawDecompressionStream());
@@ -244,7 +247,7 @@ function createValidationStream(
   expectedSize: number | undefined,
   expectedCrc32: number | undefined,
   crc32Fn: ((data: Uint8Array, value?: number) => number) | undefined,
-): TransformStream<Uint8Array, Uint8Array> {
+): TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>> {
   let byteCount = 0;
   let crc = 0;
 

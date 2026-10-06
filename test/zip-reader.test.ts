@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, expectTypeOf } from "vitest";
 import { ZipReader, ZipEntry } from "../src/index.js";
 import { macArchive } from "../src/mac-archive.js";
 import {
@@ -70,6 +70,10 @@ describe("ZipReader", () => {
       for (const entry of entries) {
         if (entry.isDirectory) continue;
         const stream = entry.readable();
+        // Compression streams only accept ArrayBuffer-backed chunks
+        expectTypeOf(stream).toEqualTypeOf<
+          ReadableStream<Uint8Array<ArrayBuffer>>
+        >();
         const content = await collectStream(stream);
         expect(content.byteLength).toBeGreaterThanOrEqual(0);
       }

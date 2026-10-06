@@ -18,7 +18,7 @@ export class FileSource implements RandomAccessSource {
     return new FileSource(handle, stats.size);
   }
 
-  async read(offset: number, length: number): Promise<Uint8Array> {
+  async read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> {
     if (this.#closed) {
       throw new Error("Source is closed");
     }

@@ -258,8 +258,7 @@ decompressed and CRC32 is validated.
 - `options.skipCrc32?: boolean` - Skip CRC32 checksum validation (default:
   `false`)
 
-**Returns:** `ReadableStream<Uint8Array<ArrayBuffer>>`, which can be piped
-straight into a `CompressionStream` or `DecompressionStream`.
+**Returns:** `ReadableStream<Uint8Array<ArrayBuffer>>`
 
 ```ts
 // Read decompressed data (default)
@@ -330,9 +329,7 @@ Interface for providing random access to ZIP data.
 **Methods:**
 
 - `read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>>` -
-  Read `length` bytes starting at `offset`. The data must not be backed by a
-  `SharedArrayBuffer`, because browsers' `DecompressionStream` rejects shared
-  memory.
+  Read `length` bytes starting at `offset`.
 - `close?(): Promise<void>` - Optional cleanup
 
 ## Safety and edge-case handling

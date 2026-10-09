@@ -3,10 +3,13 @@ import {
   DuplicateLocalFileHeader,
   EntryAliasMismatch,
   OverlappingFileData,
+  TooManyEntries,
 } from "./errors.js";
 import type { CdEntryInfo } from "./types.js";
 
 const FINGERPRINT_SIZE = 4;
+// V8 throws an opaque RangeError beyond 2^24 Map entries
+const MAX_DISTINCT_ENTRIES = 2 ** 24;
 
 // Every Local File Header is at least 30 bytes and all file data precedes the
 // Central Directory, so Σ(30 + compressedSize) over distinct header offsets
@@ -42,6 +45,9 @@ export class OverlapChecker {
       throw new OverlappingFileData({ name: entry.name });
     }
 
+    if (this.#seenOffsets.size >= MAX_DISTINCT_ENTRIES) {
+      throw new TooManyEntries({ limit: MAX_DISTINCT_ENTRIES });
+    }
     this.#seenOffsets.set(
       entry.fileHeaderOffset,
       this.#allowAliases ? this.#storeFingerprint(entry) : 0,

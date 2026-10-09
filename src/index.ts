@@ -13,9 +13,11 @@ import { crc32 as defaultCrc32 } from "#crc32";
 
 export { ZipEntry } from "./entry.js";
 export {
+  DecompressionFailed,
   DuplicateLocalFileHeader,
   EntryAliasMismatch,
   OverlappingFileData,
+  TooManyEntries,
 } from "./errors.js";
 export type {
   ZipReaderOptions,

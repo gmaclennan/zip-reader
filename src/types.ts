@@ -20,7 +20,10 @@ export interface ZipReaderOptions {
    * they read.
    */
   allowAliasedEntries?: boolean;
-  /** @deprecated Use `allowAliasedEntries` instead. */
+  /**
+   * @deprecated Use `allowAliasedEntries` instead. This now maps to it, so it
+   * allows only exact aliases rather than disabling the duplicate-offset check.
+   */
   skipUniqueEntryCheck?: boolean;
   /** Factory for Mac OS Archive Utility support. Import from 'zip-reader/mac'. */
   macArchiveFactory?: MacArchiveFactory;

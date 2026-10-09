@@ -2,12 +2,14 @@ import { describe, it, expect, expectTypeOf } from "vitest";
 import {
   ZipReader,
   ZipEntry,
+  DecompressionFailed,
   DuplicateLocalFileHeader,
   EntryAliasMismatch,
   OverlappingFileData,
 } from "../src/index.js";
 import { BufferSource } from "../src/sources/buffer.js";
 import type { RandomAccessSource } from "../src/types.js";
+import { deflateRawZeros } from "./fixture-helpers.js";
 
 const isBrowser = typeof window !== "undefined";
 
@@ -956,6 +958,146 @@ describe("Edge cases and malformed ZIP handling", () => {
       const entries = await iterate(zip);
       expect(await collectStream(entries[1].readable())).toEqual(b);
     });
+  });
+
+  describe("decompression", () => {
+    /** One deflated entry with the given compressed bytes and declared sizes */
+    function buildDeflatedZip(
+      name: string,
+      compressed: Uint8Array,
+      uncompressedSize: number,
+      crc = 0,
+    ): Uint8Array<ArrayBuffer> {
+      const nameBytes = new TextEncoder().encode(name);
+      const lfh = new Uint8Array(30 + nameBytes.length);
+      const lv = new DataView(lfh.buffer);
+      lv.setUint32(0, 0x04034b50, true);
+      lv.setUint16(4, 20, true);
+      lv.setUint16(8, 8, true);
+      lv.setUint32(14, crc, true);
+      lv.setUint32(18, compressed.length, true);
+      lv.setUint32(22, uncompressedSize, true);
+      lv.setUint16(26, nameBytes.length, true);
+      lfh.set(nameBytes, 30);
+
+      const cdh = new Uint8Array(46 + nameBytes.length);
+      const cv = new DataView(cdh.buffer);
+      cv.setUint32(0, 0x02014b50, true);
+      cv.setUint16(4, 45, true);
+      cv.setUint16(6, 20, true);
+      cv.setUint16(10, 8, true);
+      cv.setUint32(16, crc, true);
+      cv.setUint32(20, compressed.length, true);
+      cv.setUint32(24, uncompressedSize, true);
+      cv.setUint16(28, nameBytes.length, true);
+      cdh.set(nameBytes, 46);
+
+      const cdOffset = lfh.length + compressed.length;
+      const eocd = new Uint8Array(22);
+      const ev = new DataView(eocd.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, 1, true);
+      ev.setUint16(10, 1, true);
+      ev.setUint32(12, cdh.length, true);
+      ev.setUint32(16, cdOffset, true);
+
+      const zip = new Uint8Array(cdOffset + cdh.length + eocd.length);
+      zip.set(lfh, 0);
+      zip.set(compressed, lfh.length);
+      zip.set(cdh, cdOffset);
+      zip.set(eocd, cdOffset + cdh.length);
+      return zip;
+    }
+
+    async function firstEntry(
+      source: RandomAccessSource,
+      options = {},
+    ): Promise<ZipEntry> {
+      const reader = await ZipReader.from(source, options);
+      for await (const entry of reader) return entry;
+      throw new Error("no entries");
+    }
+
+    it("names the entry when deflate data is corrupt", async () => {
+      const zip = buildDeflatedZip("bad.bin", new Uint8Array([0xff, 0xff]), 10);
+      const entry = await firstEntry(new BufferSource(zip));
+      const error = await collectStream(entry.readable()).catch(
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(DecompressionFailed);
+      expect(error).toMatchObject({
+        code: "DECOMPRESSION_FAILED",
+        message: expect.stringContaining("Failed to decompress entry bad.bin"),
+      });
+      expect((error as Error).cause).toBeDefined();
+    });
+
+    it("names the entry when deflate data is empty", async () => {
+      const zip = buildDeflatedZip("empty.bin", new Uint8Array(0), 10);
+      const entry = await firstEntry(new BufferSource(zip));
+      await expect(collectStream(entry.readable())).rejects.toMatchObject({
+        code: "DECOMPRESSION_FAILED",
+        message: expect.stringMatching(
+          /^Failed to decompress entry empty\.bin: .+/,
+        ),
+      });
+    });
+
+    it("passes errors from before decompression through unchanged", async () => {
+      const compressed = await deflateRawZeros(1000);
+      const zip = buildDeflatedZip("a.bin", compressed, 1000);
+      new DataView(zip.buffer).setUint32(0, 0, true);
+      const entry = await firstEntry(new BufferSource(zip));
+      const error = await collectStream(entry.readable()).catch(
+        (e: unknown) => e,
+      );
+      expect(error).not.toBeInstanceOf(DecompressionFailed);
+      expect((error as Error).message).toBe(
+        "Invalid Local File Header signature",
+      );
+    });
+
+    it("stops at an understated size without delivering the excess", async () => {
+      // 512 MiB of zeros in ~510 KiB, declared as 1 MiB
+      const compressed = await deflateRawZeros(512 << 20);
+      const declared = 1 << 20;
+      const zip = buildDeflatedZip("bomb.bin", compressed, declared);
+      const entry = await firstEntry(new BufferSource(zip), {
+        skipCrc32: true,
+      });
+
+      const reader = entry.readable().getReader();
+      let delivered = 0;
+      const error = await (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return undefined;
+          delivered += value.byteLength;
+        }
+      })().catch((e: unknown) => e);
+
+      expect((error as Error).message).toMatch("Too many bytes in the stream");
+      expect(delivered).toBeLessThanOrEqual(declared);
+    }, 30_000);
+
+    it("bounds the size of a single decompressed chunk", async () => {
+      const total = 64 << 20;
+      const compressed = await deflateRawZeros(total);
+      const zip = buildDeflatedZip("zeros.bin", compressed, total);
+      const entry = await firstEntry(new BufferSource(zip), {
+        skipCrc32: true,
+      });
+      const reader = entry.readable().getReader();
+      let largestChunk = 0;
+      for (let i = 0; i < 8; i++) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        largestChunk = Math.max(largestChunk, value.byteLength);
+      }
+      await reader.cancel();
+      // At most 16 KiB written at a time, at deflate's ~1032:1 maximum ratio
+      expect(largestChunk).toBeLessThanOrEqual(1032 * 16384);
+    }, 30_000);
   });
 
   describe("source closure lifecycle", () => {

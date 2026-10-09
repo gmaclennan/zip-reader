@@ -1,7 +1,15 @@
 import { describe, it, expect, expectTypeOf } from "vitest";
-import { ZipReader, ZipEntry } from "../src/index.js";
+import {
+  ZipReader,
+  ZipEntry,
+  DecompressionFailed,
+  DuplicateLocalFileHeader,
+  EntryAliasMismatch,
+  OverlappingFileData,
+} from "../src/index.js";
 import { BufferSource } from "../src/sources/buffer.js";
 import type { RandomAccessSource } from "../src/types.js";
+import { deflateRawZeros } from "./fixture-helpers.js";
 
 const isBrowser = typeof window !== "undefined";
 
@@ -372,16 +380,34 @@ describe("Edge cases and malformed ZIP handling", () => {
       }
     });
 
-    it("rejects file data that overflows into CD", async () => {
+    it("rejects a declared compressed size that overflows into CD", async () => {
       const content = new TextEncoder().encode("test");
       const zip = buildZip("test.txt", content);
       const view = new DataView(zip.buffer);
 
-      // Set compressed size in CD to a value that would overflow
       const eocdOffset = zip.length - 22;
       const cdOffset = view.getUint32(eocdOffset + 16, true);
       // Set compressedSize to something huge in CD header
       view.setUint32(cdOffset + 20, 999999, true);
+
+      const reader = await ZipReader.from(new BufferSource(zip));
+      await expect(
+        (async () => {
+          for await (const _entry of reader) {
+            // iterate
+          }
+        })(),
+      ).rejects.toThrow("Overlapping file data");
+    });
+
+    it("rejects file data that overflows into CD when streaming", async () => {
+      const content = new TextEncoder().encode("test");
+      const zip = buildZip("test.txt", content);
+      const view = new DataView(zip.buffer);
+
+      // The CD sizes fit, but the LFH claims an extra field that pushes the
+      // data past the start of the CD
+      view.setUint16(28, 100, true);
 
       const reader = await ZipReader.from(new BufferSource(zip), {
         skipCrc32: true,
@@ -659,165 +685,419 @@ describe("Edge cases and malformed ZIP handling", () => {
   });
 
   describe("ZIP bomb: overlapping file data", () => {
-    it("detects duplicate local file header offsets", async () => {
-      // Build a ZIP where two CD entries point to the same LFH offset (offset 0)
+    interface CdRecord {
+      name: string;
+      offset: number;
+      compressedSize: number;
+      uncompressedSize: number;
+      crc32: number;
+      method?: number;
+      /** Write sizes and offset via a ZIP64 extra field */
+      zip64?: boolean;
+    }
+
+    /** Build a ZIP from a raw file-data region and explicit CD records. */
+    function buildZipFromRecords(
+      fileData: Uint8Array,
+      records: CdRecord[],
+    ): Uint8Array<ArrayBuffer> {
       const encoder = new TextEncoder();
-      const content = encoder.encode("Hello");
-      const name1 = encoder.encode("a.txt");
-      const name2 = encoder.encode("b.txt");
-      const crc1 = crc32(content);
-
-      // Single LFH + data
-      const lfh = new Uint8Array(30 + name1.length);
-      const lfhv = new DataView(lfh.buffer);
-      lfhv.setUint32(0, 0x04034b50, true);
-      lfhv.setUint16(4, 20, true);
-      lfhv.setUint16(12, 0x5421, true);
-      lfhv.setUint32(14, crc1, true);
-      lfhv.setUint32(18, content.length, true);
-      lfhv.setUint32(22, content.length, true);
-      lfhv.setUint16(26, name1.length, true);
-      lfh.set(name1, 30);
-
-      const cdOffset = lfh.length + content.length;
-
-      // CDH 1 - points to offset 0
-      const cdh1 = new Uint8Array(46 + name1.length);
-      const cdh1v = new DataView(cdh1.buffer);
-      cdh1v.setUint32(0, 0x02014b50, true);
-      cdh1v.setUint16(4, 45, true);
-      cdh1v.setUint16(6, 20, true);
-      cdh1v.setUint16(14, 0x5421, true);
-      cdh1v.setUint32(16, crc1, true);
-      cdh1v.setUint32(20, content.length, true);
-      cdh1v.setUint32(24, content.length, true);
-      cdh1v.setUint16(28, name1.length, true);
-      cdh1v.setUint32(42, 0, true); // offset 0
-      cdh1.set(name1, 46);
-
-      // CDH 2 - ALSO points to offset 0 (the bomb technique)
-      const cdh2 = new Uint8Array(46 + name2.length);
-      const cdh2v = new DataView(cdh2.buffer);
-      cdh2v.setUint32(0, 0x02014b50, true);
-      cdh2v.setUint16(4, 45, true);
-      cdh2v.setUint16(6, 20, true);
-      cdh2v.setUint16(14, 0x5421, true);
-      cdh2v.setUint32(16, crc1, true);
-      cdh2v.setUint32(20, content.length, true);
-      cdh2v.setUint32(24, content.length, true);
-      cdh2v.setUint16(28, name2.length, true);
-      cdh2v.setUint32(42, 0, true); // same offset 0!
-      cdh2.set(name2, 46);
-
-      // EOCD
+      const cdhs = records.map((r) => {
+        const name = encoder.encode(r.name);
+        const extra = new Uint8Array(r.zip64 ? 28 : 0);
+        const cdh = new Uint8Array(46 + name.length + extra.length);
+        const v = new DataView(cdh.buffer);
+        v.setUint32(0, 0x02014b50, true);
+        v.setUint16(4, 45, true);
+        v.setUint16(6, 20, true);
+        v.setUint16(10, r.method ?? 0, true);
+        v.setUint16(14, 0x5421, true);
+        v.setUint32(16, r.crc32, true);
+        v.setUint16(28, name.length, true);
+        v.setUint16(30, extra.length, true);
+        if (r.zip64) {
+          v.setUint32(20, 0xffffffff, true);
+          v.setUint32(24, 0xffffffff, true);
+          v.setUint32(42, 0xffffffff, true);
+          const ev = new DataView(extra.buffer);
+          ev.setUint16(0, 0x0001, true);
+          ev.setUint16(2, 24, true);
+          ev.setBigUint64(4, BigInt(r.uncompressedSize), true);
+          ev.setBigUint64(12, BigInt(r.compressedSize), true);
+          ev.setBigUint64(20, BigInt(r.offset), true);
+        } else {
+          v.setUint32(20, r.compressedSize, true);
+          v.setUint32(24, r.uncompressedSize, true);
+          v.setUint32(42, r.offset, true);
+        }
+        cdh.set(name, 46);
+        cdh.set(extra, 46 + name.length);
+        return cdh;
+      });
+      const cdSize = cdhs.reduce((n, c) => n + c.length, 0);
       const eocd = new Uint8Array(22);
-      const eocdv = new DataView(eocd.buffer);
-      eocdv.setUint32(0, 0x06054b50, true);
-      eocdv.setUint16(8, 2, true);
-      eocdv.setUint16(10, 2, true);
-      eocdv.setUint32(12, cdh1.length + cdh2.length, true);
-      eocdv.setUint32(16, cdOffset, true);
+      const ev = new DataView(eocd.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, records.length, true);
+      ev.setUint16(10, records.length, true);
+      ev.setUint32(12, cdSize, true);
+      ev.setUint32(16, fileData.length, true);
 
-      const total =
-        lfh.length + content.length + cdh1.length + cdh2.length + eocd.length;
-      const zip = new Uint8Array(total);
+      const zip = new Uint8Array(fileData.length + cdSize + eocd.length);
       let off = 0;
-      for (const part of [lfh, content, cdh1, cdh2, eocd]) {
+      for (const part of [fileData, ...cdhs, eocd]) {
         zip.set(part, off);
         off += part.length;
       }
+      return zip;
+    }
 
+    /** Local File Header + name for a stored entry */
+    function buildStoredLfh(name: string, data: Uint8Array): Uint8Array {
+      const nameBytes = new TextEncoder().encode(name);
+      const lfh = new Uint8Array(30 + nameBytes.length);
+      const v = new DataView(lfh.buffer);
+      v.setUint32(0, 0x04034b50, true);
+      v.setUint16(4, 20, true);
+      v.setUint16(12, 0x5421, true);
+      v.setUint32(14, crc32(data), true);
+      v.setUint32(18, data.length, true);
+      v.setUint32(22, data.length, true);
+      v.setUint16(26, nameBytes.length, true);
+      lfh.set(nameBytes, 30);
+      return lfh;
+    }
+
+    function concat(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
+      const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+      let off = 0;
+      for (const p of parts) {
+        out.set(p, off);
+        off += p.length;
+      }
+      return out;
+    }
+
+    function storedRecord(
+      name: string,
+      offset: number,
+      data: Uint8Array,
+    ): CdRecord {
+      return {
+        name,
+        offset,
+        compressedSize: data.length,
+        uncompressedSize: data.length,
+        crc32: crc32(data),
+      };
+    }
+
+    async function iterate(zip: Uint8Array<ArrayBuffer>, options = {}) {
+      const reader = await ZipReader.from(new BufferSource(zip), options);
+      const entries: ZipEntry[] = [];
+      for await (const entry of reader) entries.push(entry);
+      return entries;
+    }
+
+    const content = new TextEncoder().encode("Hello");
+    const storedData = concat([buildStoredLfh("a.txt", content), content]);
+
+    it("rejects entries that share a local file header by default", async () => {
+      const zip = buildZipFromRecords(storedData, [
+        storedRecord("a.txt", 0, content),
+        storedRecord("b.txt", 0, content),
+      ]);
+      const error = await iterate(zip).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(DuplicateLocalFileHeader);
+      expect(error).toMatchObject({
+        code: "DUPLICATE_LOCAL_FILE_HEADER",
+        message: expect.stringContaining(
+          "Duplicate local file header offset detected for entry b.txt",
+        ),
+      });
+    });
+
+    it("still honours the deprecated skipUniqueEntryCheck option", async () => {
+      const zip = buildZipFromRecords(storedData, [
+        storedRecord("a.txt", 0, content),
+        storedRecord("b.txt", 0, content),
+      ]);
+      const entries = await iterate(zip, {
+        skipUniqueEntryCheck: true,
+        allowAliasedEntries: undefined,
+      });
+      expect(entries).toHaveLength(2);
+      await expect(
+        iterate(zip, {
+          skipUniqueEntryCheck: true,
+          allowAliasedEntries: false,
+        }),
+      ).rejects.toThrow(DuplicateLocalFileHeader);
+    });
+
+    it("allows exact aliases when allowAliasedEntries is true", async () => {
+      // Ten aliases of a 5-byte file: their declared sizes add up to far more
+      // than the archive holds, but they all read the same bytes
+      const records = Array.from({ length: 10 }, (_, i) =>
+        storedRecord(`${i}.txt`, 0, content),
+      );
+      const zip = buildZipFromRecords(storedData, records);
+      const entries = await iterate(zip, { allowAliasedEntries: true });
+      expect(entries.map((e) => e.name)).toEqual(records.map((r) => r.name));
+      for (const entry of entries) {
+        expect(await collectStream(entry.readable())).toEqual(content);
+      }
+    });
+
+    it.each([
+      { compressedSize: 4 },
+      { uncompressedSize: 6 },
+      { crc32: 0 },
+      { method: 8 },
+    ])("rejects aliases that disagree on %o", async (change) => {
+      const zip = buildZipFromRecords(storedData, [
+        storedRecord("a.txt", 0, content),
+        { ...storedRecord("b.txt", 0, content), ...change },
+      ]);
+      await expect(iterate(zip, { allowAliasedEntries: true })).rejects.toThrow(
+        EntryAliasMismatch,
+      );
+    });
+
+    it("rejects entries whose data contains other entries' headers", async () => {
+      // c's data is the tail of b's data, which is the tail of a's data.
+      // Each entry is individually valid, so a naive reader extracts all three,
+      // and the same layout with deflate streams is the overlapping ZIP bomb.
+      const tail = new TextEncoder().encode("payload");
+      const dataB = concat([buildStoredLfh("c", tail), tail]);
+      const lfhB = buildStoredLfh("b", dataB);
+      const dataA = concat([lfhB, dataB]);
+      const lfhA = buildStoredLfh("a", dataA);
+      const fileData = concat([lfhA, dataA]);
+      const offsetB = lfhA.length;
+      const offsetC = offsetB + lfhB.length;
+      const records = [
+        storedRecord("a", 0, dataA),
+        storedRecord("b", offsetB, dataB),
+        storedRecord("c", offsetC, tail),
+      ];
+      const zip = buildZipFromRecords(fileData, records);
+      await expect(iterate(zip)).rejects.toThrow(OverlappingFileData);
+      await expect(iterate(zip, { allowAliasedEntries: true })).rejects.toThrow(
+        OverlappingFileData,
+      );
+    });
+
+    it("rejects entries before reading them, based on declared sizes", async () => {
+      // Distinct offsets whose compressed sizes cannot all fit before the
+      // Central Directory: detected during iteration, without touching data
+      const fileData = concat([
+        buildStoredLfh("a", content),
+        content,
+        buildStoredLfh("b", content),
+        content,
+      ]);
+      const zip = buildZipFromRecords(fileData, [
+        storedRecord("a", 0, content),
+        { ...storedRecord("b", 35, content), compressedSize: 100 },
+      ]);
       const reader = await ZipReader.from(new BufferSource(zip));
+      const seen: string[] = [];
       await expect(
         (async () => {
-          for await (const _entry of reader) {
-            // iterate
-          }
+          for await (const entry of reader) seen.push(entry.name);
         })(),
-      ).rejects.toThrow("Duplicate local file header offset detected");
-    });
-
-    it("allows duplicate offsets when uniqueEntryOffsets is false", async () => {
-      // Same ZIP as above, but with the check disabled
-      const encoder = new TextEncoder();
-      const content = encoder.encode("Hello");
-      const name1 = encoder.encode("a.txt");
-      const name2 = encoder.encode("b.txt");
-      const crc1 = crc32(content);
-
-      const lfh = new Uint8Array(30 + name1.length);
-      const lfhv = new DataView(lfh.buffer);
-      lfhv.setUint32(0, 0x04034b50, true);
-      lfhv.setUint16(4, 20, true);
-      lfhv.setUint16(12, 0x5421, true);
-      lfhv.setUint32(14, crc1, true);
-      lfhv.setUint32(18, content.length, true);
-      lfhv.setUint32(22, content.length, true);
-      lfhv.setUint16(26, name1.length, true);
-      lfh.set(name1, 30);
-
-      const cdOffset = lfh.length + content.length;
-
-      const cdh1 = new Uint8Array(46 + name1.length);
-      const cdh1v = new DataView(cdh1.buffer);
-      cdh1v.setUint32(0, 0x02014b50, true);
-      cdh1v.setUint16(4, 45, true);
-      cdh1v.setUint16(6, 20, true);
-      cdh1v.setUint16(14, 0x5421, true);
-      cdh1v.setUint32(16, crc1, true);
-      cdh1v.setUint32(20, content.length, true);
-      cdh1v.setUint32(24, content.length, true);
-      cdh1v.setUint16(28, name1.length, true);
-      cdh1v.setUint32(42, 0, true);
-      cdh1.set(name1, 46);
-
-      const cdh2 = new Uint8Array(46 + name2.length);
-      const cdh2v = new DataView(cdh2.buffer);
-      cdh2v.setUint32(0, 0x02014b50, true);
-      cdh2v.setUint16(4, 45, true);
-      cdh2v.setUint16(6, 20, true);
-      cdh2v.setUint16(14, 0x5421, true);
-      cdh2v.setUint32(16, crc1, true);
-      cdh2v.setUint32(20, content.length, true);
-      cdh2v.setUint32(24, content.length, true);
-      cdh2v.setUint16(28, name2.length, true);
-      cdh2v.setUint32(42, 0, true);
-      cdh2.set(name2, 46);
-
-      const eocd = new Uint8Array(22);
-      const eocdv = new DataView(eocd.buffer);
-      eocdv.setUint32(0, 0x06054b50, true);
-      eocdv.setUint16(8, 2, true);
-      eocdv.setUint16(10, 2, true);
-      eocdv.setUint32(12, cdh1.length + cdh2.length, true);
-      eocdv.setUint32(16, cdOffset, true);
-
-      const total =
-        lfh.length + content.length + cdh1.length + cdh2.length + eocd.length;
-      const zip = new Uint8Array(total);
-      let off = 0;
-      for (const part of [lfh, content, cdh1, cdh2, eocd]) {
-        zip.set(part, off);
-        off += part.length;
-      }
-
-      const reader = await ZipReader.from(new BufferSource(zip), {
-        skipUniqueEntryCheck: true,
+      ).rejects.toMatchObject({
+        code: "OVERLAPPING_FILE_DATA",
+        message: expect.stringContaining("at entry b"),
       });
-      const entries: ZipEntry[] = [];
-      for await (const entry of reader) {
-        entries.push(entry);
-      }
-      expect(entries.length).toBe(2);
-      expect(entries[0].name).toBe("a.txt");
-      expect(entries[1].name).toBe("b.txt");
-
-      // Both entries should read the same data
-      const data1 = await collectStream(entries[0].readable());
-      const data2 = await collectStream(entries[1].readable());
-      expect(data1).toEqual(content);
-      expect(data2).toEqual(content);
+      expect(seen).toEqual(["a"]);
     });
+
+    it("checks sizes and offsets resolved from ZIP64 extra fields", async () => {
+      const b = new TextEncoder().encode("World");
+      const lfhA = buildStoredLfh("a", content);
+      const fileData = concat([lfhA, content, buildStoredLfh("b", b), b]);
+      const recordB = {
+        ...storedRecord("b", lfhA.length + content.length, b),
+        zip64: true,
+      };
+      const ok = buildZipFromRecords(fileData, [
+        storedRecord("a", 0, content),
+        recordB,
+      ]);
+      const entries = await iterate(ok);
+      expect(entries[1].zip64).toBe(true);
+      expect(await collectStream(entries[1].readable())).toEqual(b);
+
+      const overflowing = buildZipFromRecords(fileData, [
+        storedRecord("a", 0, content),
+        { ...recordB, compressedSize: 100 },
+      ]);
+      await expect(iterate(overflowing)).rejects.toThrow(OverlappingFileData);
+
+      const aliased = buildZipFromRecords(fileData, [
+        storedRecord("a", 0, content),
+        { ...storedRecord("c", 0, content), zip64: true },
+      ]);
+      await expect(iterate(aliased)).rejects.toThrow(DuplicateLocalFileHeader);
+      expect(
+        await iterate(aliased, { allowAliasedEntries: true }),
+      ).toHaveLength(2);
+    });
+
+    it("accepts adjacent non-overlapping entries", async () => {
+      const b = new TextEncoder().encode("World");
+      const lfhA = buildStoredLfh("a", content);
+      const lfhB = buildStoredLfh("b", b);
+      const fileData = concat([lfhA, content, lfhB, b]);
+      const zip = buildZipFromRecords(fileData, [
+        storedRecord("a", 0, content),
+        storedRecord("b", lfhA.length + content.length, b),
+      ]);
+      const entries = await iterate(zip);
+      expect(await collectStream(entries[1].readable())).toEqual(b);
+    });
+  });
+
+  describe("decompression", () => {
+    /** One deflated entry with the given compressed bytes and declared sizes */
+    function buildDeflatedZip(
+      name: string,
+      compressed: Uint8Array,
+      uncompressedSize: number,
+      crc = 0,
+    ): Uint8Array<ArrayBuffer> {
+      const nameBytes = new TextEncoder().encode(name);
+      const lfh = new Uint8Array(30 + nameBytes.length);
+      const lv = new DataView(lfh.buffer);
+      lv.setUint32(0, 0x04034b50, true);
+      lv.setUint16(4, 20, true);
+      lv.setUint16(8, 8, true);
+      lv.setUint32(14, crc, true);
+      lv.setUint32(18, compressed.length, true);
+      lv.setUint32(22, uncompressedSize, true);
+      lv.setUint16(26, nameBytes.length, true);
+      lfh.set(nameBytes, 30);
+
+      const cdh = new Uint8Array(46 + nameBytes.length);
+      const cv = new DataView(cdh.buffer);
+      cv.setUint32(0, 0x02014b50, true);
+      cv.setUint16(4, 45, true);
+      cv.setUint16(6, 20, true);
+      cv.setUint16(10, 8, true);
+      cv.setUint32(16, crc, true);
+      cv.setUint32(20, compressed.length, true);
+      cv.setUint32(24, uncompressedSize, true);
+      cv.setUint16(28, nameBytes.length, true);
+      cdh.set(nameBytes, 46);
+
+      const cdOffset = lfh.length + compressed.length;
+      const eocd = new Uint8Array(22);
+      const ev = new DataView(eocd.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, 1, true);
+      ev.setUint16(10, 1, true);
+      ev.setUint32(12, cdh.length, true);
+      ev.setUint32(16, cdOffset, true);
+
+      const zip = new Uint8Array(cdOffset + cdh.length + eocd.length);
+      zip.set(lfh, 0);
+      zip.set(compressed, lfh.length);
+      zip.set(cdh, cdOffset);
+      zip.set(eocd, cdOffset + cdh.length);
+      return zip;
+    }
+
+    async function firstEntry(
+      source: RandomAccessSource,
+      options = {},
+    ): Promise<ZipEntry> {
+      const reader = await ZipReader.from(source, options);
+      for await (const entry of reader) return entry;
+      throw new Error("no entries");
+    }
+
+    it("names the entry when deflate data is corrupt", async () => {
+      const zip = buildDeflatedZip("bad.bin", new Uint8Array([0xff, 0xff]), 10);
+      const entry = await firstEntry(new BufferSource(zip));
+      const error = await collectStream(entry.readable()).catch(
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(DecompressionFailed);
+      expect(error).toMatchObject({
+        code: "DECOMPRESSION_FAILED",
+        message: expect.stringContaining("Failed to decompress entry bad.bin"),
+      });
+      expect((error as Error).cause).toBeDefined();
+    });
+
+    it("names the entry when deflate data is empty", async () => {
+      const zip = buildDeflatedZip("empty.bin", new Uint8Array(0), 10);
+      const entry = await firstEntry(new BufferSource(zip));
+      await expect(collectStream(entry.readable())).rejects.toMatchObject({
+        code: "DECOMPRESSION_FAILED",
+        message: expect.stringMatching(
+          /^Failed to decompress entry empty\.bin: .+/,
+        ),
+      });
+    });
+
+    it("passes errors from before decompression through unchanged", async () => {
+      const compressed = await deflateRawZeros(1000);
+      const zip = buildDeflatedZip("a.bin", compressed, 1000);
+      new DataView(zip.buffer).setUint32(0, 0, true);
+      const entry = await firstEntry(new BufferSource(zip));
+      const error = await collectStream(entry.readable()).catch(
+        (e: unknown) => e,
+      );
+      expect(error).not.toBeInstanceOf(DecompressionFailed);
+      expect((error as Error).message).toBe(
+        "Invalid Local File Header signature",
+      );
+    });
+
+    it("stops at an understated size without delivering the excess", async () => {
+      // 512 MiB of zeros in ~510 KiB, declared as 1 MiB
+      const compressed = await deflateRawZeros(512 << 20);
+      const declared = 1 << 20;
+      const zip = buildDeflatedZip("bomb.bin", compressed, declared);
+      const entry = await firstEntry(new BufferSource(zip), {
+        skipCrc32: true,
+      });
+
+      const reader = entry.readable().getReader();
+      let delivered = 0;
+      const error = await (async () => {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return undefined;
+          delivered += value.byteLength;
+        }
+      })().catch((e: unknown) => e);
+
+      expect((error as Error).message).toMatch("Too many bytes in the stream");
+      expect(delivered).toBeLessThanOrEqual(declared);
+    }, 30_000);
+
+    it("bounds the size of a single decompressed chunk", async () => {
+      const total = 64 << 20;
+      const compressed = await deflateRawZeros(total);
+      const zip = buildDeflatedZip("zeros.bin", compressed, total);
+      const entry = await firstEntry(new BufferSource(zip), {
+        skipCrc32: true,
+      });
+      const reader = entry.readable().getReader();
+      let largestChunk = 0;
+      for (let i = 0; i < 8; i++) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        largestChunk = Math.max(largestChunk, value.byteLength);
+      }
+      await reader.cancel();
+      // At most 16 KiB written at a time, at deflate's ~1032:1 maximum ratio
+      expect(largestChunk).toBeLessThanOrEqual(1032 * 16384);
+    }, 30_000);
   });
 
   describe("source closure lifecycle", () => {

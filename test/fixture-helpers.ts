@@ -129,3 +129,26 @@ export async function loadFixtureOptions(
     return {};
   }
 }
+
+/** Raw deflate stream of `totalBytes` zero bytes, built without holding them */
+export async function deflateRawZeros(
+  totalBytes: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const chunk = new Uint8Array(1 << 20);
+  let sent = 0;
+  const input = new ReadableStream<Uint8Array<ArrayBuffer>>({
+    pull(controller) {
+      if (sent >= totalBytes) return controller.close();
+      const size = Math.min(chunk.byteLength, totalBytes - sent);
+      controller.enqueue(chunk.subarray(0, size));
+      sent += size;
+    },
+  });
+  const compressed = input.pipeThrough(
+    new CompressionStream("deflate-raw") as unknown as TransformStream<
+      Uint8Array<ArrayBuffer>,
+      Uint8Array<ArrayBuffer>
+    >,
+  );
+  return new Uint8Array(await new Response(compressed).arrayBuffer());
+}

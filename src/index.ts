@@ -8,9 +8,17 @@ import type {
 import { parseEocd } from "./parse-eocd.js";
 import { iterateCdEntries } from "./parse-central-dir.js";
 import { ZipEntry } from "./entry.js";
+import { OverlapChecker } from "./overlap.js";
 import { crc32 as defaultCrc32 } from "#crc32";
 
 export { ZipEntry } from "./entry.js";
+export {
+  DecompressionFailed,
+  DuplicateLocalFileHeader,
+  EntryAliasMismatch,
+  OverlappingFileData,
+  TooManyEntries,
+} from "./errors.js";
 export type {
   ZipReaderOptions,
   RandomAccessSource,
@@ -20,7 +28,7 @@ export type {
 } from "./types.js";
 
 type NormalizedZipReaderOptions = Required<
-  Omit<ZipReaderOptions, "macArchiveFactory">
+  Omit<ZipReaderOptions, "macArchiveFactory" | "skipUniqueEntryCheck">
 >;
 
 type ResolvedOptions = NormalizedZipReaderOptions & {
@@ -32,7 +40,7 @@ const DEFAULT_OPTIONS: NormalizedZipReaderOptions = {
   skipCrc32: false,
   skipSizeCheck: false,
   skipFilenameValidation: false,
-  skipUniqueEntryCheck: false,
+  allowAliasedEntries: false,
 };
 
 const INTERNAL = Symbol("Constructor only for internal use");
@@ -68,11 +76,8 @@ export class ZipReader {
     source: RandomAccessSource,
     options?: ZipReaderOptions,
   ): Promise<ZipReader> {
-    const { macArchiveFactory, ...normalizedOptions } = Object.assign(
-      {},
-      DEFAULT_OPTIONS,
-      options,
-    );
+    const { macArchiveFactory, skipUniqueEntryCheck, ...normalizedOptions } =
+      Object.assign({}, DEFAULT_OPTIONS, options);
     const eocd = await parseEocd(source, !!macArchiveFactory);
 
     let macArchiveHandler: MacArchiveHandler | null = null;
@@ -85,6 +90,8 @@ export class ZipReader {
       ...normalizedOptions,
       // Object.assign lets an explicit `crc32: undefined` replace the default
       crc32: options?.crc32 ?? defaultCrc32,
+      allowAliasedEntries:
+        options?.allowAliasedEntries ?? skipUniqueEntryCheck ?? false,
       macArchiveHandler,
     };
 
@@ -105,10 +112,10 @@ export class ZipReader {
       macArchiveHandler,
     };
 
-    // Track seen file header offsets to detect overlapping entries (ZIP bomb technique)
-    const seenOffsets = !this.#opts.skipUniqueEntryCheck
-      ? new Set<number>()
-      : null;
+    const overlapChecker = new OverlapChecker(
+      cd.centralDirectoryOffset,
+      this.#opts.allowAliasedEntries,
+    );
 
     let entryIndex = 0;
     for await (const { entry: entryInfo, entryEnd } of iterateCdEntries(
@@ -122,21 +129,15 @@ export class ZipReader {
         }
       }
 
-      // Detect overlapping file data — multiple CD entries pointing to the
-      // same local file header is the key technique in ZIP bombs.
-      if (seenOffsets?.has(entryInfo.fileHeaderOffset)) {
-        throw new Error(
-          "Duplicate local file header offset detected (possible ZIP bomb)",
-        );
-      }
-      seenOffsets?.add(entryInfo.fileHeaderOffset);
-
       if (
         macArchiveHandler?.isMacArchive ||
         macArchiveHandler?.isMaybeMacArchive
       ) {
         await macArchiveHandler.processEntry(entryInfo, entryIndex, entryEnd);
       }
+
+      // After processEntry, which corrects truncated Mac offsets and sizes
+      overlapChecker.check(entryInfo);
 
       yield new ZipEntry(entryInfo, ctx);
       entryIndex++;

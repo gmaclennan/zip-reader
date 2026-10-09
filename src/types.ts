@@ -8,12 +8,21 @@ export interface ZipReaderOptions {
   /** Skip filename validation for dangerous paths. Default: false */
   skipFilenameValidation?: boolean;
   /**
-   * Skip checks for each Central Directory entry pointing to a unique Local
-   * File Header, which protects against overlapping ZIP bombs. Default: false
+   * Allow multiple Central Directory entries to reference the same Local File
+   * Header, so that one copy of the file data appears under several names.
+   * Default: false
    *
-   * Set to true if the archive legitimately uses duplicate entries. In that
-   * case, callers should track total decompressed bytes themselves to guard
-   * against excessive output.
+   * Aliased entries must be exact duplicates of the first entry (same sizes,
+   * CRC32 and compression method); entries that share a header but disagree
+   * are always rejected, and the declared compressed sizes of all other
+   * entries must still fit within the archive. Because every alias can be
+   * read in full, callers should bound the total number of entries or bytes
+   * they read.
+   */
+  allowAliasedEntries?: boolean;
+  /**
+   * @deprecated Use `allowAliasedEntries` instead. This now maps to it, so it
+   * allows only exact aliases rather than disabling the duplicate-offset check.
    */
   skipUniqueEntryCheck?: boolean;
   /** Factory for Mac OS Archive Utility support. Import from 'zip-reader/mac'. */

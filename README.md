@@ -194,7 +194,7 @@ const zip = await ZipReader.from(source, {
   skipCrc32: false, // default
   skipSizeCheck: false, // default
   skipFilenameValidation: false, // default
-  skipUniqueEntryCheck: false, // default
+  allowAliasedEntries: false, // default
   macArchiveFactory: macArchive, // optional, import from "@gmaclennan/zip-reader/mac"
 });
 ```
@@ -230,7 +230,9 @@ Represents a single entry in the ZIP archive.
 - `name: string` - Entry name including internal path
 - `comment: string` - Entry comment
 - `compressedSize: number` - Compressed size in bytes
-- `uncompressedSize: number` - Uncompressed size in bytes
+- `uncompressedSize: number` - Uncompressed size in bytes. Unless
+  `skipSizeCheck` is set, `readable()` never delivers more than this, so you
+  can decide whether to read an entry before reading it
 - `crc32: number` - CRC32 checksum
 - `compressionMethod: number` - Compression method (0 = stored, 8 = deflate)
 - `lastModified: Date` - Last modification date
@@ -249,7 +251,11 @@ Represents a single entry in the ZIP archive.
 ##### `readable(options?): ReadableStream<Uint8Array<ArrayBuffer>>`
 
 Get a `ReadableStream` of the entry's data. By default, compressed entries are
-decompressed and CRC32 is validated.
+decompressed and both the size and CRC32 are validated. The stream errors if
+the data is longer than `uncompressedSize`, before delivering the excess. A
+short length or a CRC32 mismatch can only be detected at the end, so the stream
+errors after delivering the last chunk. Treat the data as untrusted until the
+stream closes without error.
 
 **Parameters:**
 
@@ -311,10 +317,17 @@ for await (const entry of zip) {
   `false`
 - `skipFilenameValidation?: boolean` - Skip filename validation for dangerous
   paths (absolute paths, `..` traversal). Default: `false`
-- `skipUniqueEntryCheck?: boolean` - Skip checks for each Central Directory
-  entry pointing to a unique Local File Header. Protects against overlapping ZIP
-  bombs. Set to `true` for archives that legitimately share file data (e.g. tile
-  maps with deduplicated tiles). Default: `false`
+- `allowAliasedEntries?: boolean` - Allow multiple Central Directory entries
+  to reference the same Local File Header, so one copy of the file data appears
+  under several names (e.g. tile maps with deduplicated tiles). Aliased entries
+  must be exact duplicates of the first entry (same sizes, CRC32 and compression
+  method), and the declared compressed sizes of all other entries must still
+  fit within the archive. Default: `false`
+- `skipUniqueEntryCheck?: boolean` - **Deprecated.** Use
+  `allowAliasedEntries`, which this now maps to; ignored when
+  `allowAliasedEntries` is set. It used to disable the duplicate-offset check
+  entirely; it now allows only exact aliases, and the other overlap checks
+  always apply.
 - `macArchiveFactory?: MacArchiveFactory` - Factory for Mac OS Archive Utility
   support. Import from `"@gmaclennan/zip-reader/mac"`.
 
@@ -332,6 +345,33 @@ Interface for providing random access to ZIP data.
   Read `length` bytes starting at `offset`.
 - `close?(): Promise<void>` - Optional cleanup
 
+### Errors
+
+These errors are exported classes with a stable `code` property, so callers
+can handle them without matching message text:
+
+| Class                      | `code`                        | Thrown when                                                                                                           |
+| -------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `DecompressionFailed`      | `DECOMPRESSION_FAILED`        | An entry's compressed data is corrupt or truncated; the message names the entry and the original error is the `cause` |
+| `DuplicateLocalFileHeader` | `DUPLICATE_LOCAL_FILE_HEADER` | Two entries reference the same local file header and `allowAliasedEntries` is not set                                 |
+| `EntryAliasMismatch`       | `ENTRY_ALIAS_MISMATCH`        | An aliased entry disagrees with the first entry on size, CRC32 or compression method                                  |
+| `OverlappingFileData`      | `OVERLAPPING_FILE_DATA`       | The compressed sizes of the entries seen so far cannot all fit before the Central Directory                           |
+| `TooManyEntries`           | `TOO_MANY_ENTRIES`            | The archive has more than 2^24 distinct entries, too many to check for overlap                                        |
+
+```ts
+import { ZipReader, DuplicateLocalFileHeader } from "@gmaclennan/zip-reader";
+
+try {
+  for await (const entry of zip) {
+    // ...
+  }
+} catch (error) {
+  if (error instanceof DuplicateLocalFileHeader) {
+    // Reopen with { allowAliasedEntries: true } if aliases are expected
+  }
+}
+```
+
 ## Safety and edge-case handling
 
 ZIP is a decades-old format with many quirks, ambiguities, and
@@ -341,18 +381,38 @@ open an issue.
 
 ### Handled by default
 
-| Category                            | What's checked                                                                        | Details                                                                                                                                                                    |
-| ----------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Path traversal**                  | Rejects `..` segments, absolute paths, backslashes, Windows drive letters, null bytes | Prevents directory escape and path truncation attacks. Disable with `skipFilenameValidation: true`.                                                                        |
-| **ZIP bombs (overlapping entries)** | Rejects multiple CD entries pointing to the same local file header                    | Detects the [overlapping file data](https://www.bamsoftware.com/hacks/zipbomb/) technique. Disable with `skipUniqueEntryCheck: true` for legitimate use cases (see below). |
-| **ZIP bombs (size mismatch)**       | Validates decompressed output against declared `uncompressedSize`                     | A single entry cannot silently decompress to more than its declared size. Disable with `skipSizeCheck: true`.                                                              |
-| **CRC32 validation**                | Validates checksum on decompressed data                                               | Catches corruption and tampered content. Disable with `skipCrc32: true`.                                                                                                   |
-| **Structural consistency**          | Entry count vs. Central Directory size, CD bounds vs. EOCD offset                     | Rejects archives where the EOCD metadata is internally inconsistent, catching malformed files early.                                                                       |
-| **ZIP64 safe integers**             | Rejects 64-bit values above `Number.MAX_SAFE_INTEGER`                                 | Prevents silent precision loss that could cause incorrect offsets or sizes.                                                                                                |
-| **Source bounds checking**          | All built-in sources validate read offsets                                            | Throws a clear `RangeError` rather than returning silently short data.                                                                                                     |
-| **Strong encryption**               | Rejected at parse time                                                                | Throws rather than returning garbage data.                                                                                                                                 |
-| **Multi-disk archives**             | Rejected at parse time                                                                | Not supported; detected and rejected cleanly.                                                                                                                              |
-| **Mac OS Archive Utility**          | Detects and corrects truncated 32-bit values                                          | Mac's built-in archiver creates non-conformant ZIPs with truncated sizes, offsets, and entry counts. Opt-in via `macArchiveFactory` option.                                |
+| Category                            | What's checked                                                                                            | Details                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Path traversal**                  | Rejects `..` segments, absolute paths, backslashes, Windows drive letters, null bytes                     | Prevents directory escape and path truncation attacks. Disable with `skipFilenameValidation: true`.                                                                                                                                                                                                         |
+| **ZIP bombs (overlapping entries)** | Rejects entries sharing a local file header, and declared compressed sizes that cannot fit in the archive | Bounds the total output of an archive to what its size allows, which defeats the [overlapping file data](https://www.bamsoftware.com/hacks/zipbomb/) technique during Central Directory iteration. `allowAliasedEntries: true` permits exact aliases of an entry (see [Aliased entries](#aliased-entries)). |
+| **ZIP bombs (size mismatch)**       | Validates decompressed output against declared `uncompressedSize`                                         | An entry never delivers more than its declared size: the stream errors on the chunk that would exceed it. Decompression is lazy, so the excess is not inflated in the background. Disable with `skipSizeCheck: true`.                                                                                       |
+| **CRC32 validation**                | Validates checksum on decompressed data                                                                   | Catches corruption and tampered content. Disable with `skipCrc32: true`.                                                                                                                                                                                                                                    |
+| **Structural consistency**          | Entry count vs. Central Directory size, CD bounds vs. EOCD offset                                         | Rejects archives where the EOCD metadata is internally inconsistent, catching malformed files early.                                                                                                                                                                                                        |
+| **ZIP64 safe integers**             | Rejects 64-bit values above `Number.MAX_SAFE_INTEGER`                                                     | Prevents silent precision loss that could cause incorrect offsets or sizes.                                                                                                                                                                                                                                 |
+| **Source bounds checking**          | All built-in sources validate read offsets                                                                | Throws a clear `RangeError` rather than returning silently short data.                                                                                                                                                                                                                                      |
+| **Strong encryption**               | Rejected at parse time                                                                                    | Throws rather than returning garbage data.                                                                                                                                                                                                                                                                  |
+| **Multi-disk archives**             | Rejected at parse time                                                                                    | Not supported; detected and rejected cleanly.                                                                                                                                                                                                                                                               |
+| **Mac OS Archive Utility**          | Detects and corrects truncated 32-bit values                                                              | Mac's built-in archiver creates non-conformant ZIPs with truncated sizes, offsets, and entry counts. Opt-in via `macArchiveFactory` option.                                                                                                                                                                 |
+
+### Aliased entries
+
+`allowAliasedEntries: true` lets several Central Directory entries reference
+one local file, so one copy of the data appears under several names. Each
+alias must match the first entry exactly (sizes, CRC32 and compression method),
+and all other checks still apply, so an alias can never produce different data
+or more data than the entry it points to.
+
+What changes is the bound on total output. Without aliases, the total output of
+an archive is limited by its size. With aliases, an archive can declare many
+names for one large entry, so total output is limited by the sum of the
+declared `uncompressedSize` of the entries you read, not by the archive size.
+That sum is a hard limit unless you set `skipSizeCheck`, in which case each
+alias can produce up to its compressed size times the deflate maximum.
+Reading one entry costs the same as it would in a normal archive, and the
+declared sizes are known before you read anything, so this matters only if you
+read every entry without checking. If you do that, cap the total bytes you
+accept, or stop when the declared sizes add up to more than you are willing to
+handle.
 
 ### What this library does _not_ do
 
@@ -362,9 +422,21 @@ files to disk, so some concerns are the caller's responsibility:
 - **Symlink attacks** — ZIP entries can represent symlinks via external
   attributes, but this library treats all entries as regular files/directories.
   If you create symlinks on disk, validate their targets yourself.
-- **Total output size limits** — Each entry's size is validated individually,
-  but if you extract an entire archive you should track cumulative bytes written
-  and enforce your own limit.
+- **Total output size limits** — Deflate can legitimately expand data about
+  1032 times, so a 1 MB archive can hold an honest 1 GB entry. Because the
+  declared compressed sizes of all entries must fit before the Central
+  Directory, reading each entry once yields at most about 1032 times that much
+  data in total. Stored entries and `rawEntry` reads are 1:1. This bound does
+  not hold if you read an entry more than once or set `allowAliasedEntries`
+  (see [Aliased entries](#aliased-entries)). Check each entry's
+  `uncompressedSize` before reading it and enforce your own total, as in
+  [Error Handling](#error-handling).
+- **Nested archives** — An entry can itself be a ZIP file (the classic
+  "42.zip" bomb). This library does not open nested archives; if you do, limit
+  the nesting depth and count their output against the same total.
+- **Committing partial output** — CRC32 mismatches and short entries are only
+  detected when a stream ends. Write to a temporary location and move it into
+  place only after the stream closes without error.
 - **Filename encoding heuristics** — When the UTF-8 flag (general purpose
   bit 11) is not set, filenames are decoded as CP437 per the spec. Some tools
   (notably Mac's Archive Utility) write UTF-8 without setting this flag. The
@@ -383,13 +455,26 @@ No special configuration is needed — it's handled automatically.
 
 ## Error Handling
 
+Check declared sizes before reading, and keep a running total, so that an
+archive cannot make you buffer more than you intend. Each entry's
+`uncompressedSize` is enforced, so checking it before reading is reliable.
+
 ```ts
+const MAX_ENTRY_SIZE = 50 * 1024 * 1024;
+const MAX_TOTAL_SIZE = 500 * 1024 * 1024;
+
 try {
   const zip = await ZipReader.from(source);
+  let total = 0;
   for await (const entry of zip) {
-    const stream = entry.readable();
-    const response = new Response(stream);
-    const data = await response.arrayBuffer();
+    if (entry.isDirectory) continue;
+    if (entry.uncompressedSize > MAX_ENTRY_SIZE) {
+      throw new Error(`${entry.name} is too large`);
+    }
+    total += entry.uncompressedSize;
+    if (total > MAX_TOTAL_SIZE) throw new Error("Archive is too large");
+
+    const data = await new Response(entry.readable()).arrayBuffer();
   }
 } catch (error) {
   console.error("Failed to read ZIP:", error);
@@ -403,6 +488,8 @@ Common errors:
 - `"Decryption is not supported"` - Entry is encrypted
 - `"Strong encryption is not supported"` - Entry uses strong encryption
 - `"Multi-disk ZIP files are not supported"` - Split archives
+
+See [Errors](#errors) for error classes with stable codes.
 
 ## License
 

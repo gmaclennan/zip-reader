@@ -15,10 +15,6 @@ import { readFields, dosDateTimeToDate } from "./utils.js";
 import { LFH_FIELDS } from "./zip-records.js";
 import { DecompressionFailed } from "./errors.js";
 
-// WebKit inflates a whole input chunk into one output chunk, so a 64 KiB write
-// can emit 64 MiB at once; 16 KiB writes cap that at ~16 MiB
-const MAX_DECOMPRESSOR_WRITE = 16384;
-
 const QUEUING_STRATEGY = new ByteLengthQueuingStrategy({
   highWaterMark: 65536,
 });
@@ -220,13 +216,7 @@ export class ZipEntry {
         chunkSize,
       );
       bytesRead += chunk.byteLength;
-      if (decompress && chunk.byteLength > MAX_DECOMPRESSOR_WRITE) {
-        for (let i = 0; i < chunk.byteLength; i += MAX_DECOMPRESSOR_WRITE) {
-          controller.enqueue(chunk.subarray(i, i + MAX_DECOMPRESSOR_WRITE));
-        }
-      } else {
-        controller.enqueue(chunk);
-      }
+      controller.enqueue(chunk);
 
       if (bytesRead >= compressedSize) {
         controller.close();
@@ -236,7 +226,8 @@ export class ZipEntry {
     let stream: ReadableStream<Uint8Array<ArrayBuffer>> = rawStream;
 
     if (decompress) {
-      stream = stream.pipeThrough(
+      stream = pipeThroughOneWriteAtATime(
+        stream,
         new DecompressionStream("deflate-raw") as TransformStream<
           Uint8Array<ArrayBuffer>,
           Uint8Array<ArrayBuffer>
@@ -354,6 +345,32 @@ function createOutputStream(
     },
     { highWaterMark: 0 },
   );
+}
+
+/**
+ * Like `input.pipeThrough(transform)`, but waits for each write to finish
+ * before reading the next chunk. Node before 24.19 miscounts backpressure on
+ * DecompressionStream's input, so pipeThrough reads the whole entry into memory
+ * ahead of the reader: https://github.com/nodejs/node/pull/62986
+ */
+function pipeThroughOneWriteAtATime<I, O>(
+  input: ReadableStream<I>,
+  transform: TransformStream<I, O>,
+): ReadableStream<O> {
+  const reader = input.getReader();
+  const writer = transform.writable.getWriter();
+  (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return writer.close();
+      await writer.write(value);
+    }
+  })().catch((error: unknown) => {
+    // An upstream error reaches the reader as the same object, as with pipeThrough
+    writer.abort(error).catch(() => {});
+    reader.cancel(error).catch(() => {});
+  });
+  return transform.readable;
 }
 
 function describeError(error: unknown): string {

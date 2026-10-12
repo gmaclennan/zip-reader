@@ -1080,24 +1080,42 @@ describe("Edge cases and malformed ZIP handling", () => {
       expect(delivered).toBeLessThanOrEqual(declared);
     }, 30_000);
 
-    it("bounds the size of a single decompressed chunk", async () => {
-      const total = 64 << 20;
-      const compressed = await deflateRawZeros(total);
-      const zip = buildDeflatedZip("zeros.bin", compressed, total);
-      const entry = await firstEntry(new BufferSource(zip), {
-        skipCrc32: true,
-      });
-      const reader = entry.readable().getReader();
-      let largestChunk = 0;
-      for (let i = 0; i < 8; i++) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        largestChunk = Math.max(largestChunk, value.byteLength);
+    it("reads entry data in bounded slices, only as the reader pulls", async () => {
+      const data = new Uint8Array(1 << 20);
+      for (let i = 0; i < data.length; i += 65536) {
+        crypto.getRandomValues(data.subarray(i, i + 65536));
       }
-      await reader.cancel();
-      // At most 16 KiB written at a time, at deflate's ~1032:1 maximum ratio
-      expect(largestChunk).toBeLessThanOrEqual(1032 * 16384);
-    }, 30_000);
+      const compressed = new Uint8Array(
+        await new Response(
+          new Blob([data])
+            .stream()
+            .pipeThrough(new CompressionStream("deflate-raw")),
+        ).arrayBuffer(),
+      );
+      const inner = new BufferSource(
+        buildDeflatedZip("random.bin", compressed, data.length),
+      );
+      const reads: number[] = [];
+      const source: RandomAccessSource = {
+        size: inner.size,
+        read(offset, length) {
+          reads.push(length);
+          return inner.read(offset, length);
+        },
+      };
+      const entry = await firstEntry(source, { skipCrc32: true });
+      reads.length = 0;
+
+      const reader = entry.readable().getReader();
+      await reader.read();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const readAhead = reads.reduce((a, b) => a + b, 0);
+      while (!(await reader.read()).done);
+
+      // A few queued slices are expected; the whole 1 MiB entry is not
+      expect(readAhead).toBeLessThan(compressed.length / 2);
+      expect(Math.max(...reads)).toBeLessThanOrEqual(65536);
+    });
   });
 
   describe("source closure lifecycle", () => {

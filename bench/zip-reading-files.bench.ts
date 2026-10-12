@@ -60,7 +60,8 @@ benchmarks("Medium files (100 × 100KB)", {
 benchmarks("Large files (5 × 10MB)", {
   fileCount: 5,
   fileSize: 10 * 1024 * 1024,
-  iterations: 10,
+  iterations: 5,
+  warmupIterations: 2,
   time: 1000,
 });
 

@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createNodeInflateRawStream } from "../src/deflate-raw-node.js";
-import { deflateRawZeros } from "./fixture-helpers.js";
+import {
+  deflateRawZeros,
+  supportsDeflateRawStreams,
+} from "./fixture-helpers.js";
 
 type ByteTransform = TransformStream<
   Uint8Array<ArrayBuffer>,
@@ -8,12 +11,14 @@ type ByteTransform = TransformStream<
 >;
 
 const inflaters: Array<[string, () => ByteTransform]> = [
-  [
-    "native DecompressionStream",
-    () => new DecompressionStream("deflate-raw") as unknown as ByteTransform,
-  ],
   ["createInflateRaw fallback", createNodeInflateRawStream],
 ];
+if (supportsDeflateRawStreams) {
+  inflaters.push([
+    "native DecompressionStream",
+    () => new DecompressionStream("deflate-raw") as unknown as ByteTransform,
+  ]);
+}
 
 describe.each(inflaters)("Node %s", (_, createInflate) => {
   it("does not inflate ahead of the reader", async () => {

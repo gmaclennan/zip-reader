@@ -28,14 +28,14 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       reporter: ["lcov", "text"],
     },
-    benchmark: {
-      include: ["bench/**/*.bench.ts"],
-    },
     projects: [
       {
         test: {
           name: "node",
           environment: "node",
+          benchmark: {
+            include: ["bench/**/*.bench.ts"],
+          },
           include: ["test/**/*.test.ts"],
           exclude: [
             "test/browser.test.ts",
@@ -49,9 +49,6 @@ export default defineConfig({
         },
       },
       {
-        optimizeDeps: {
-          exclude: ["execa", "node:zlib", "zlib", "node:stream"],
-        },
         test: {
           name: "browser",
           include: ["test/zip-reader.test.ts", "test/edge-cases.test.ts"],

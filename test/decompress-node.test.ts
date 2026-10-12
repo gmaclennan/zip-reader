@@ -6,7 +6,7 @@ type ByteTransform = TransformStream<
   Uint8Array<ArrayBuffer>
 >;
 
-// MAX_DECOMPRESSOR_WRITE = Infinity in deflate-raw-node.ts relies on this
+// ZipEntry's memory bound relies on Node's inflate respecting backpressure
 const createInflate = () =>
   new DecompressionStream("deflate-raw") as unknown as ByteTransform;
 

@@ -45,7 +45,6 @@ export default defineConfig({
           ],
           alias: {
             "#crc32": "/src/crc-node.ts",
-            "#deflate-raw": "/src/deflate-raw-node.ts",
           },
         },
       },
@@ -59,7 +58,6 @@ export default defineConfig({
           exclude: ["**/node_modules/**", "**/.git/**", "vendor/**"],
           alias: {
             "#crc32": "/src/crc-browser.ts",
-            "#deflate-raw": "/src/deflate-raw-browser.ts",
           },
           browser: {
             ui: false,

@@ -14,10 +14,7 @@ import type {
 import { readFields, dosDateTimeToDate } from "./utils.js";
 import { LFH_FIELDS } from "./zip-records.js";
 import { DecompressionFailed } from "./errors.js";
-import {
-  createDeflateRawDecompressionStream,
-  MAX_DECOMPRESSOR_WRITE,
-} from "#deflate-raw";
+import { MAX_DECOMPRESSOR_WRITE } from "#deflate-raw";
 
 const QUEUING_STRATEGY = new ByteLengthQueuingStrategy({
   highWaterMark: 65536,
@@ -236,7 +233,12 @@ export class ZipEntry {
     let stream: ReadableStream<Uint8Array<ArrayBuffer>> = rawStream;
 
     if (decompress) {
-      stream = stream.pipeThrough(createDeflateRawDecompressionStream());
+      stream = stream.pipeThrough(
+        new DecompressionStream("deflate-raw") as TransformStream<
+          Uint8Array<ArrayBuffer>,
+          Uint8Array<ArrayBuffer>
+        >,
+      );
     }
 
     const shouldValidateSize =

@@ -130,25 +130,10 @@ export async function loadFixtureOptions(
   }
 }
 
-/** Whether this runtime's Compression Streams support "deflate-raw" */
-export const supportsDeflateRawStreams = (() => {
-  try {
-    new DecompressionStream("deflate-raw");
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 /** Raw deflate stream of `totalBytes` zero bytes, built without holding them */
 export async function deflateRawZeros(
   totalBytes: number,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  // Node 18 lacks "deflate-raw" Compression Streams
-  if (!supportsDeflateRawStreams) {
-    const { deflateRawSync } = await import("node:zlib");
-    return new Uint8Array(deflateRawSync(new Uint8Array(totalBytes)));
-  }
   const chunk = new Uint8Array(1 << 20);
   let sent = 0;
   const input = new ReadableStream<Uint8Array<ArrayBuffer>>({

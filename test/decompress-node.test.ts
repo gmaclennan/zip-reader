@@ -1,26 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { createNodeInflateRawStream } from "../src/deflate-raw-node.js";
-import {
-  deflateRawZeros,
-  supportsDeflateRawStreams,
-} from "./fixture-helpers.js";
+import { deflateRawZeros } from "./fixture-helpers.js";
 
 type ByteTransform = TransformStream<
   Uint8Array<ArrayBuffer>,
   Uint8Array<ArrayBuffer>
 >;
 
-const inflaters: Array<[string, () => ByteTransform]> = [
-  ["createInflateRaw fallback", createNodeInflateRawStream],
-];
-if (supportsDeflateRawStreams) {
-  inflaters.push([
-    "native DecompressionStream",
-    () => new DecompressionStream("deflate-raw") as unknown as ByteTransform,
-  ]);
-}
+// MAX_DECOMPRESSOR_WRITE = Infinity in deflate-raw-node.ts relies on this
+const createInflate = () =>
+  new DecompressionStream("deflate-raw") as unknown as ByteTransform;
 
-describe.each(inflaters)("Node %s", (_, createInflate) => {
+describe("Node deflate-raw DecompressionStream", () => {
   it("does not inflate ahead of the reader", async () => {
     const compressed = await deflateRawZeros(512 << 20);
     let offset = 0;

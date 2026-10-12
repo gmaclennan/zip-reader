@@ -5,18 +5,14 @@ export class BufferSource implements RandomAccessSource {
   readonly #data: Uint8Array<ArrayBuffer>;
 
   constructor(data: Uint8Array<ArrayBuffer> | ArrayBuffer) {
-    this.#data =
-      data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+    this.#data = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
     this.size = this.#data.byteLength;
   }
 
-  async read(
-    offset: number,
-    length: number,
-  ): Promise<Uint8Array<ArrayBuffer>> {
+  async read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> {
     if (offset < 0 || offset + length > this.size) {
       throw new RangeError(
-        `Read out of bounds: offset=${offset} length=${length} size=${this.size}`
+        `Read out of bounds: offset=${offset} length=${length} size=${this.size}`,
       );
     }
     return this.#data.subarray(offset, offset + length);

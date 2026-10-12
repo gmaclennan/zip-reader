@@ -5,9 +5,7 @@ const isBrowser = typeof window !== "undefined";
 
 // Node only: absolute path to the fixtures directory.
 // `import.meta.dirname` works in Node (ESM) but is undefined in browser vitest.
-const FIXTURES_DIR_ABS = isBrowser
-  ? ""
-  : `${import.meta.dirname}/fixtures`;
+const FIXTURES_DIR_ABS = isBrowser ? "" : `${import.meta.dirname}/fixtures`;
 
 function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(base64);
@@ -78,9 +76,8 @@ export async function getExpectedFiles(
     }
     return result;
   } else {
-    const { readdirSync, statSync, existsSync, readFileSync } = await import(
-      "node:fs"
-    );
+    const { readdirSync, statSync, existsSync, readFileSync } =
+      await import("node:fs");
     const dirPath = `${FIXTURES_DIR_ABS}/${relDirPath}`;
     const files: Record<string, Uint8Array | null> = {};
     if (!existsSync(dirPath)) return files;

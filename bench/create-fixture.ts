@@ -5,7 +5,7 @@
 import { ZipWriter } from "zip-writer";
 import { readableFromBytes } from "zip-writer/readable-from-bytes.js";
 
-function createContent(index: number, size: number): Uint8Array {
+function createContent(index: number, size: number): Uint8Array<ArrayBuffer> {
   const pattern = `Line ${index}: Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n`;
   const patternBytes = new TextEncoder().encode(pattern);
   const buffer = new Uint8Array(size);
@@ -17,18 +17,12 @@ function createContent(index: number, size: number): Uint8Array {
 
 export async function createFixtureZip(
   fileCount: number,
-  fileSize: number
-): Promise<Uint8Array> {
+  fileSize: number,
+): Promise<Uint8Array<ArrayBuffer>> {
   const zipWriter = new ZipWriter();
-
-  const chunks: Uint8Array[] = [];
-  const consumePromise = zipWriter.readable.pipeTo(
-    new WritableStream({
-      write(chunk) {
-        chunks.push(chunk);
-      },
-    })
-  );
+  const zipBytes = new Response(zipWriter.readable).bytes();
+  // Avoid an unhandled rejection if addEntry() throws before zipBytes is awaited
+  zipBytes.catch(() => {});
 
   for (let i = 0; i < fileCount; i++) {
     const name = `file-${i.toString().padStart(6, "0")}.txt`;
@@ -40,15 +34,5 @@ export async function createFixtureZip(
   }
 
   zipWriter.finalize();
-  await consumePromise;
-
-  let totalLength = 0;
-  for (const c of chunks) totalLength += c.byteLength;
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const c of chunks) {
-    result.set(c, offset);
-    offset += c.byteLength;
-  }
-  return result;
+  return zipBytes;
 }

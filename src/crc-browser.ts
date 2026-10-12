@@ -60,7 +60,7 @@ for (let i = 0; i <= 0xff; i++) {
  */
 export function crc32(
   data: Uint8Array<ArrayBuffer>,
-  value: number = 0
+  value: number = 0,
 ): number {
   let crc = ~value;
   let i = 0;

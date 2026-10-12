@@ -14,10 +14,10 @@ import type {
 import { readFields, dosDateTimeToDate } from "./utils.js";
 import { LFH_FIELDS } from "./zip-records.js";
 import { DecompressionFailed } from "./errors.js";
-import {
-  createDeflateRawDecompressionStream,
-  MAX_DECOMPRESSOR_WRITE,
-} from "#deflate-raw";
+
+// WebKit inflates a whole input chunk into one output chunk, so a 64 KiB write
+// can emit 64 MiB at once; 16 KiB writes cap that at ~16 MiB
+const MAX_DECOMPRESSOR_WRITE = 16384;
 
 const QUEUING_STRATEGY = new ByteLengthQueuingStrategy({
   highWaterMark: 65536,
@@ -236,7 +236,12 @@ export class ZipEntry {
     let stream: ReadableStream<Uint8Array<ArrayBuffer>> = rawStream;
 
     if (decompress) {
-      stream = stream.pipeThrough(createDeflateRawDecompressionStream());
+      stream = stream.pipeThrough(
+        new DecompressionStream("deflate-raw") as TransformStream<
+          Uint8Array<ArrayBuffer>,
+          Uint8Array<ArrayBuffer>
+        >,
+      );
     }
 
     const shouldValidateSize =

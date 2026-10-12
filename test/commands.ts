@@ -1,10 +1,8 @@
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { readdirSync, statSync, existsSync, readFileSync } from "node:fs";
 import type { BrowserCommandContext } from "vitest/node";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = resolve(__dirname, "fixtures");
+const FIXTURES_DIR = resolve(import.meta.dirname, "fixtures");
 
 /**
  * All paths accepted by these commands are relative to the fixtures directory.
@@ -68,10 +66,7 @@ export function loadFixtureOptionsCmd(
   _ctx: BrowserCommandContext,
   relZipPath: string,
 ): Record<string, unknown> {
-  const jsonPath = join(
-    FIXTURES_DIR,
-    relZipPath.replace(/\.zip$/, ".json"),
-  );
+  const jsonPath = join(FIXTURES_DIR, relZipPath.replace(/\.zip$/, ".json"));
   if (existsSync(jsonPath)) {
     return JSON.parse(readFileSync(jsonPath, "utf-8")) as Record<
       string,

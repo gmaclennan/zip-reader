@@ -21,6 +21,8 @@ export async function createFixtureZip(
 ): Promise<Uint8Array<ArrayBuffer>> {
   const zipWriter = new ZipWriter();
   const zipBytes = new Response(zipWriter.readable).bytes();
+  // Avoid an unhandled rejection if addEntry() throws before zipBytes is awaited
+  zipBytes.catch(() => {});
 
   for (let i = 0; i < fileCount; i++) {
     const name = `file-${i.toString().padStart(6, "0")}.txt`;

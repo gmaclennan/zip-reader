@@ -51,6 +51,8 @@ export default defineConfig({
       {
         test: {
           name: "browser",
+          // The benches use Node-only libraries
+          benchmark: { include: [] },
           include: ["test/zip-reader.test.ts", "test/edge-cases.test.ts"],
           exclude: ["**/node_modules/**", "**/.git/**", "vendor/**"],
           alias: {

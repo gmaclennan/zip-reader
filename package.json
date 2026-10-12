@@ -79,7 +79,7 @@
   },
   "lint-staged": {
     "*.js": "eslint --cache --fix",
-    "*.{js,css,md}": "prettier --write"
+    "*.{ts,js,json,css,md,yml}": "prettier --write"
   },
   "repository": {
     "type": "git",

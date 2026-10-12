@@ -24,11 +24,6 @@ import { createFixtureZip } from "./create-fixture.js";
 import * as yauzlPromise from "yauzl-promise";
 import { unzipSync } from "fflate";
 
-const tempDir = await mkdtemp(join(tmpdir(), "zip-read-bench-"));
-process.on("beforeExit", async () => {
-  await rm(tempDir, { recursive: true, force: true });
-});
-
 async function consumeStream(
   stream: ReadableStream<Uint8Array>,
 ): Promise<void> {
@@ -95,7 +90,9 @@ function benchmarks(
     ...runOptions
   }: { fileCount: number; fileSize: number } & BenchRunOptions,
 ) {
-  test(name, async ({ bench }) => {
+  test(name, async ({ bench, onTestFinished }) => {
+    const tempDir = await mkdtemp(join(tmpdir(), "zip-read-bench-"));
+    onTestFinished(() => rm(tempDir, { recursive: true, force: true }));
     const zipPath = join(tempDir, `fixture-${fileCount}x${fileSize}.zip`);
     await writeFile(zipPath, await createFixtureZip(fileCount, fileSize));
 
@@ -128,6 +125,7 @@ benchmarks("Medium files (100 × 100KB)", {
 benchmarks("Large files (5 × 10MB)", {
   fileCount: 5,
   fileSize: 10 * 1024 * 1024,
+  iterations: 10,
   time: 1000,
 });
 

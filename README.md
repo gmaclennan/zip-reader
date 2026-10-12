@@ -442,6 +442,133 @@ files to disk, so some concerns are the caller's responsibility:
   (notably Mac's Archive Utility) write UTF-8 without setting this flag. The
   library does not attempt to guess the encoding.
 
+## Benchmarks
+
+Run using `npm run bench`. On a MacBook Pro (M2 Pro, 2023), Node.js 24.21.0.
+Each library reads every entry of the same archive and decompresses its data,
+using its default options. "In memory" reads from a buffer; "From a file" reads
+from a path on disk, with random access where the library supports it.
+
+### In memory
+
+#### Small files (10 × 10KB)
+
+| Library                   | ops/sec  | Relative speed |
+| ------------------------- | -------- | -------------- |
+| fflate                    | 4,268.41 | fastest        |
+| adm-zip                   | 1,926.89 | 2.22x slower   |
+| **zip-reader**            | 1,592.43 | 2.68x slower   |
+| **zip-reader (js crc32)** | 1,431.05 | 2.98x slower   |
+| jszip                     | 1,102.45 | 3.87x slower   |
+| unzipper                  | 1,093.05 | 3.91x slower   |
+| yauzl                     | 1,052.22 | 4.06x slower   |
+| yauzl-promise             | 975.73   | 4.37x slower   |
+| @zip.js/zip.js            | 591.19   | 7.22x slower   |
+
+#### Medium files (100 × 100KB)
+
+| Library                   | ops/sec | Relative speed |
+| ------------------------- | ------- | -------------- |
+| fflate                    | 55.55   | fastest        |
+| **zip-reader**            | 52.23   | 1.06x slower   |
+| yauzl                     | 50.01   | 1.11x slower   |
+| unzipper                  | 47.40   | 1.17x slower   |
+| yauzl-promise             | 41.63   | 1.33x slower   |
+| jszip                     | 39.18   | 1.42x slower   |
+| **zip-reader (js crc32)** | 31.44   | 1.77x slower   |
+| @zip.js/zip.js            | 29.72   | 1.87x slower   |
+| adm-zip                   | 24.54   | 2.26x slower   |
+
+#### Large files (5 × 10MB)
+
+| Library                   | ops/sec | Relative speed |
+| ------------------------- | ------- | -------------- |
+| unzipper                  | 19.46   | fastest        |
+| yauzl                     | 16.37   | 1.19x slower   |
+| **zip-reader**            | 15.74   | 1.24x slower   |
+| yauzl-promise             | 13.71   | 1.42x slower   |
+| jszip                     | 12.96   | 1.50x slower   |
+| @zip.js/zip.js            | 11.87   | 1.64x slower   |
+| fflate                    | 11.43   | 1.70x slower   |
+| **zip-reader (js crc32)** | 7.91    | 2.46x slower   |
+| adm-zip                   | 5.11    | 3.81x slower   |
+
+#### Many files (1000 × 1KB)
+
+| Library                   | ops/sec | Relative speed |
+| ------------------------- | ------- | -------------- |
+| fflate                    | 172.11  | fastest        |
+| adm-zip                   | 58.49   | 2.94x slower   |
+| **zip-reader (js crc32)** | 18.04   | 9.54x slower   |
+| **zip-reader**            | 17.30   | 9.95x slower   |
+| jszip                     | 12.83   | 13.41x slower  |
+| unzipper                  | 12.00   | 14.35x slower  |
+| yauzl                     | 11.01   | 15.63x slower  |
+| yauzl-promise             | 9.83    | 17.51x slower  |
+| @zip.js/zip.js            | 6.18    | 27.86x slower  |
+
+### From a file
+
+#### Small files (10 × 10KB)
+
+| Library         | ops/sec  | Relative speed |
+| --------------- | -------- | -------------- |
+| fflate          | 3,116.10 | fastest        |
+| adm-zip         | 1,736.96 | 1.79x slower   |
+| node-stream-zip | 1,445.34 | 2.16x slower   |
+| **zip-reader**  | 1,094.89 | 2.85x slower   |
+| yauzl           | 1,045.42 | 2.98x slower   |
+| jszip           | 940.79   | 3.31x slower   |
+| unzipper        | 669.12   | 4.66x slower   |
+| yauzl-promise   | 662.62   | 4.70x slower   |
+
+#### Medium files (100 × 100KB)
+
+| Library         | ops/sec | Relative speed |
+| --------------- | ------- | -------------- |
+| fflate          | 55.94   | fastest        |
+| node-stream-zip | 51.60   | 1.08x slower   |
+| yauzl           | 49.81   | 1.12x slower   |
+| **zip-reader**  | 42.65   | 1.31x slower   |
+| jszip           | 37.48   | 1.49x slower   |
+| unzipper        | 37.01   | 1.51x slower   |
+| yauzl-promise   | 34.84   | 1.61x slower   |
+| adm-zip         | 25.32   | 2.21x slower   |
+
+#### Large files (5 × 10MB)
+
+| Library         | ops/sec | Relative speed |
+| --------------- | ------- | -------------- |
+| node-stream-zip | 22.96   | fastest        |
+| yauzl           | 22.80   | 1.01x slower   |
+| unzipper        | 19.51   | 1.18x slower   |
+| yauzl-promise   | 17.71   | 1.30x slower   |
+| **zip-reader**  | 16.49   | 1.39x slower   |
+| fflate          | 11.56   | 1.99x slower   |
+| jszip           | 10.26   | 2.24x slower   |
+| adm-zip         | 5.12    | 4.48x slower   |
+
+#### Many files (1000 × 1KB)
+
+| Library         | ops/sec | Relative speed |
+| --------------- | ------- | -------------- |
+| fflate          | 162.47  | fastest        |
+| adm-zip         | 55.73   | 2.92x slower   |
+| node-stream-zip | 15.46   | 10.51x slower  |
+| **zip-reader**  | 12.39   | 13.12x slower  |
+| jszip           | 11.66   | 13.94x slower  |
+| yauzl           | 10.55   | 15.40x slower  |
+| unzipper        | 7.49    | 21.70x slower  |
+| yauzl-promise   | 7.06    | 23.01x slower  |
+
+Note: These benchmarks vary quite a bit between runs, and they aren't an
+indication that any library is "better" than any other. Libraries do different
+amounts of validation by default, and the fastest ones here (fflate and
+adm-zip) decompress synchronously and need the whole archive in memory.
+zip-reader streams each entry and always checks its CRC32 and size. For
+zip-reader, these exist as a check that performance isn't significantly worse
+than other libraries.
+
 ## ZIP64 Support
 
 The library automatically handles ZIP64 format when present:

@@ -1,81 +1,14 @@
 /**
  * ZIP Reading Benchmarks (in-memory)
  *
- * Compares zip-reader performance against popular Node.js ZIP libraries:
- * - yauzl-promise: The most popular ZIP reader for Node.js
- * - fflate: Fast compression library with sync unzip
- * - @zip.js/zip.js: Modern ZIP library with Web Streams support
- *
- * All benchmarks read from in-memory buffers and consume all entry data.
- * Fixture ZIPs are created before each comparison runs, so setup time is excluded.
+ * Every library reads the same ZIP from an in-memory buffer and decompresses
+ * all entry data. Fixture ZIPs are created before each comparison runs, so
+ * setup time is excluded.
  */
 
 import { test, type BenchRunOptions } from "vitest";
-import { ZipReader } from "../src/index.js";
-import { BufferSource } from "../src/sources/buffer.js";
 import { createFixtureZip } from "./create-fixture.js";
-import * as yauzlPromise from "yauzl-promise";
-import { unzipSync } from "fflate";
-import { ZipReader as ZipJsReader, Uint8ArrayWriter } from "@zip.js/zip.js";
-
-async function consumeStream(
-  stream: ReadableStream<Uint8Array>,
-): Promise<void> {
-  const reader = stream.getReader();
-  while (true) {
-    const { done } = await reader.read();
-    if (done) break;
-  }
-}
-
-// ---- Benchmark functions ----
-
-async function benchmarkZipReader(
-  zipData: Uint8Array<ArrayBuffer>,
-): Promise<void> {
-  const zip = await ZipReader.from(new BufferSource(zipData));
-  for await (const entry of zip) {
-    if (entry.isDirectory) continue;
-    await consumeStream(entry.readable());
-  }
-}
-
-async function benchmarkYauzlPromise(
-  zipData: Uint8Array<ArrayBuffer>,
-): Promise<void> {
-  const zip = await yauzlPromise.fromBuffer(Buffer.from(zipData));
-  try {
-    for await (const entry of zip) {
-      if (entry.filename.endsWith("/")) continue;
-      const stream = await entry.openReadStream();
-      // yauzl returns Node Readable, consume manually
-      await new Promise<void>((resolve, reject) => {
-        stream.on("end", resolve);
-        stream.on("error", reject);
-        stream.resume();
-      });
-    }
-  } finally {
-    await zip.close();
-  }
-}
-
-function benchmarkFflate(zipData: Uint8Array<ArrayBuffer>): void {
-  unzipSync(zipData);
-}
-
-async function benchmarkZipJs(zipData: Uint8Array<ArrayBuffer>): Promise<void> {
-  const blob = new Blob([zipData]);
-  const reader = new ZipJsReader(new Response(blob).body!);
-  const entries = await reader.getEntries();
-  for (const entry of entries) {
-    if (entry.directory) continue;
-    await entry.getData!(new Uint8ArrayWriter());
-  }
-  await reader.close();
-}
-
-// ---- Parametric benchmark suite ----
+import * as readers from "./readers.js";
 
 function benchmarks(
   name: string,
@@ -86,13 +19,20 @@ function benchmarks(
   }: { fileCount: number; fileSize: number } & BenchRunOptions,
 ) {
   test(name, async ({ bench }) => {
-    const zipData = await createFixtureZip(fileCount, fileSize);
+    const data = await createFixtureZip(fileCount, fileSize);
 
     await bench.compare(
-      bench("zip-reader", () => benchmarkZipReader(zipData)),
-      bench("yauzl-promise", () => benchmarkYauzlPromise(zipData)),
-      bench("fflate", () => benchmarkFflate(zipData)),
-      bench("@zip.js/zip.js", () => benchmarkZipJs(zipData)),
+      bench("zip-reader", () => readers.zipReaderBuffer(data)),
+      bench("zip-reader (js crc32)", () =>
+        readers.zipReaderBufferJsCrc32(data),
+      ),
+      bench("yauzl", () => readers.yauzlBuffer(data)),
+      bench("yauzl-promise", () => readers.yauzlPromiseBuffer(data)),
+      bench("fflate", () => readers.fflateBuffer(data)),
+      bench("@zip.js/zip.js", () => readers.zipJsBuffer(data)),
+      bench("adm-zip", () => readers.admZipBuffer(data)),
+      bench("jszip", () => readers.jszipBuffer(data)),
+      bench("unzipper", () => readers.unzipperBuffer(data)),
       runOptions,
     );
   });

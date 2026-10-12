@@ -13,7 +13,11 @@ import type {
 } from "./types.js";
 import { readFields, dosDateTimeToDate } from "./utils.js";
 import { LFH_FIELDS } from "./zip-records.js";
-import { createDeflateRawDecompressionStream } from "#deflate-raw";
+import { DecompressionFailed } from "./errors.js";
+import {
+  createDeflateRawDecompressionStream,
+  MAX_DECOMPRESSOR_WRITE,
+} from "#deflate-raw";
 
 const QUEUING_STRATEGY = new ByteLengthQueuingStrategy({
   highWaterMark: 65536,
@@ -130,159 +134,226 @@ export class ZipEntry {
     let fileDataOffset = 0;
     let bytesRead = 0;
 
+    // Errors raised before decompression reach the decompressor as an abort
+    // and come back out unchanged; anything else is the decompressor's own
+    let upstreamError: { reason: unknown } | undefined;
+    const recordUpstreamError = (error: unknown): never => {
+      upstreamError = { reason: error };
+      throw error;
+    };
+
     const rawStream = new ReadableStream<Uint8Array<ArrayBuffer>>(
       {
-        async start(controller) {
-          const lfhData = await ctx.source.read(
-            fileHeaderOffset,
-            LOCAL_FILE_HEADER_SIZE,
-          );
-          const lfhView = new DataView(
-            lfhData.buffer,
-            lfhData.byteOffset,
-            lfhData.byteLength,
-          );
-
-          const {
-            signature,
-            localCrc32,
-            localCompressedSize,
-            localUncompressedSize,
-            filenameLength,
-            extraFieldsLength,
-          } = readFields(lfhView, LFH_FIELDS);
-
-          if (signature !== LOCAL_FILE_HEADER_SIGNATURE) {
-            controller.error(new Error("Invalid Local File Header signature"));
-            return;
-          }
-
-          fileDataOffset =
-            fileHeaderOffset +
-            LOCAL_FILE_HEADER_SIZE +
-            filenameLength +
-            extraFieldsLength;
-
-          // Mac archive LFH validation
-          const mac = ctx.macArchiveHandler;
-          if (mac && (mac.isMacArchive || mac.isMaybeMacArchive)) {
-            mac.validateLocalFileHeader(
-              info,
-              localCrc32,
-              localCompressedSize,
-              localUncompressedSize,
-              filenameLength,
-              extraFieldsLength,
-            );
-          }
-
-          if (
-            compressedSize !== 0 &&
-            fileDataOffset + compressedSize > ctx.centralDirectoryOffset
-          ) {
-            controller.error(
-              new Error(
-                `File data overflows file bounds: ${fileDataOffset} + ${compressedSize} > ${ctx.centralDirectoryOffset}`,
-              ),
-            );
-            return;
-          }
-        },
-
-        async pull(controller) {
-          if (bytesRead >= compressedSize) {
-            controller.close();
-            return;
-          }
-
-          const remaining = compressedSize - bytesRead;
-          const desired = Math.max(controller.desiredSize ?? 65536, 16384);
-          const chunkSize = Math.min(remaining, desired);
-          const chunk = await ctx.source.read(
-            fileDataOffset + bytesRead,
-            chunkSize,
-          );
-          bytesRead += chunk.byteLength;
-          controller.enqueue(chunk);
-
-          if (bytesRead >= compressedSize) {
-            controller.close();
-          }
-        },
+        start: () => readLocalFileHeader().catch(recordUpstreamError),
+        pull: (controller) =>
+          readFileData(controller).catch(recordUpstreamError),
       },
       QUEUING_STRATEGY,
     );
 
-    // Build transform pipeline
+    async function readLocalFileHeader(): Promise<void> {
+      const lfhData = await ctx.source.read(
+        fileHeaderOffset,
+        LOCAL_FILE_HEADER_SIZE,
+      );
+      const lfhView = new DataView(
+        lfhData.buffer,
+        lfhData.byteOffset,
+        lfhData.byteLength,
+      );
+
+      const {
+        signature,
+        localCrc32,
+        localCompressedSize,
+        localUncompressedSize,
+        filenameLength,
+        extraFieldsLength,
+      } = readFields(lfhView, LFH_FIELDS);
+
+      if (signature !== LOCAL_FILE_HEADER_SIGNATURE) {
+        throw new Error("Invalid Local File Header signature");
+      }
+
+      fileDataOffset =
+        fileHeaderOffset +
+        LOCAL_FILE_HEADER_SIZE +
+        filenameLength +
+        extraFieldsLength;
+
+      // Mac archive LFH validation
+      const mac = ctx.macArchiveHandler;
+      if (mac && (mac.isMacArchive || mac.isMaybeMacArchive)) {
+        mac.validateLocalFileHeader(
+          info,
+          localCrc32,
+          localCompressedSize,
+          localUncompressedSize,
+          filenameLength,
+          extraFieldsLength,
+        );
+      }
+
+      if (
+        compressedSize !== 0 &&
+        fileDataOffset + compressedSize > ctx.centralDirectoryOffset
+      ) {
+        throw new Error(
+          `File data overflows file bounds: ${fileDataOffset} + ${compressedSize} > ${ctx.centralDirectoryOffset}`,
+        );
+      }
+    }
+
+    async function readFileData(
+      controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>,
+    ): Promise<void> {
+      if (bytesRead >= compressedSize) {
+        controller.close();
+        return;
+      }
+
+      const remaining = compressedSize - bytesRead;
+      const desired = Math.max(controller.desiredSize ?? 65536, 16384);
+      const chunkSize = Math.min(remaining, desired);
+      const chunk = await ctx.source.read(
+        fileDataOffset + bytesRead,
+        chunkSize,
+      );
+      bytesRead += chunk.byteLength;
+      if (decompress && chunk.byteLength > MAX_DECOMPRESSOR_WRITE) {
+        for (let i = 0; i < chunk.byteLength; i += MAX_DECOMPRESSOR_WRITE) {
+          controller.enqueue(chunk.subarray(i, i + MAX_DECOMPRESSOR_WRITE));
+        }
+      } else {
+        controller.enqueue(chunk);
+      }
+
+      if (bytesRead >= compressedSize) {
+        controller.close();
+      }
+    }
+
     let stream: ReadableStream<Uint8Array<ArrayBuffer>> = rawStream;
 
     if (decompress) {
       stream = stream.pipeThrough(createDeflateRawDecompressionStream());
     }
 
-    // Validate size and/or CRC32 on decompressed data in a single transform
     const shouldValidateSize =
       ctx.validateEntrySizes && (decompress || !this.#isCompressed);
     const shouldValidateCrc =
       validateCrc32 && (decompress || !this.#isCompressed);
 
-    if (shouldValidateSize || shouldValidateCrc) {
-      stream = stream.pipeThrough(
-        createValidationStream(
-          shouldValidateSize ? info.uncompressedSize : undefined,
-          shouldValidateCrc ? info.crc32 : undefined,
-          shouldValidateCrc ? ctx.crc32 : undefined,
-        ),
-      );
+    if (!decompress && !shouldValidateSize && !shouldValidateCrc) {
+      return stream;
     }
 
-    return stream;
+    return createOutputStream(stream, {
+      expectedSize: shouldValidateSize ? info.uncompressedSize : undefined,
+      expectedCrc32: shouldValidateCrc ? info.crc32 : undefined,
+      crc32Fn: shouldValidateCrc ? ctx.crc32 : undefined,
+      mapError: decompress
+        ? (error) =>
+            upstreamError && error === upstreamError.reason
+              ? error
+              : new DecompressionFailed(
+                  { name: info.name, reason: describeError(error) },
+                  { cause: error },
+                )
+        : undefined,
+    });
   }
 }
 
 /**
- * Combined size + CRC32 validation in a single TransformStream.
+ * Validate size and CRC32 of the entry's output, and name the entry in
+ * decompression errors, in a single pull-through stage.
  */
-function createValidationStream(
-  expectedSize: number | undefined,
-  expectedCrc32: number | undefined,
-  crc32Fn: ((data: Uint8Array, value?: number) => number) | undefined,
-): TransformStream<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>> {
+function createOutputStream(
+  input: ReadableStream<Uint8Array<ArrayBuffer>>,
+  {
+    expectedSize,
+    expectedCrc32,
+    crc32Fn,
+    mapError,
+  }: {
+    expectedSize: number | undefined;
+    expectedCrc32: number | undefined;
+    crc32Fn: ((data: Uint8Array, value?: number) => number) | undefined;
+    mapError: ((error: unknown) => unknown) | undefined;
+  },
+): ReadableStream<Uint8Array<ArrayBuffer>> {
+  const reader = input.getReader();
   let byteCount = 0;
   let crc = 0;
 
-  return new TransformStream({
-    transform(chunk, controller) {
-      byteCount += chunk.byteLength;
-      if (expectedSize !== undefined && byteCount > expectedSize) {
-        controller.error(
-          new Error(
-            `Too many bytes in the stream. Expected ${expectedSize}, got at least ${byteCount}.`,
-          ),
-        );
-        return;
-      }
-      if (crc32Fn) {
-        crc = crc32Fn(chunk, crc);
-      }
-      controller.enqueue(chunk);
+  const fail = (
+    controller: ReadableStreamDefaultController<Uint8Array<ArrayBuffer>>,
+    error: Error,
+  ) => {
+    controller.error(error);
+    reader.cancel(error).catch(() => {});
+  };
+
+  return new ReadableStream<Uint8Array<ArrayBuffer>>(
+    {
+      async pull(controller) {
+        let result: ReadableStreamReadResult<Uint8Array<ArrayBuffer>>;
+        try {
+          result = await reader.read();
+        } catch (error) {
+          controller.error(mapError ? mapError(error) : error);
+          return;
+        }
+
+        if (result.done) {
+          if (expectedSize !== undefined && byteCount < expectedSize) {
+            fail(
+              controller,
+              new Error(
+                `Not enough bytes in the stream. Expected ${expectedSize}, got only ${byteCount}.`,
+              ),
+            );
+          } else if (expectedCrc32 !== undefined && crc !== expectedCrc32) {
+            fail(
+              controller,
+              new Error(
+                `CRC32 validation failed. Expected ${expectedCrc32}, received ${crc}.`,
+              ),
+            );
+          } else {
+            controller.close();
+          }
+          return;
+        }
+
+        const chunk = result.value;
+        byteCount += chunk.byteLength;
+        if (expectedSize !== undefined && byteCount > expectedSize) {
+          fail(
+            controller,
+            new Error(
+              `Too many bytes in the stream. Expected ${expectedSize}, got at least ${byteCount}.`,
+            ),
+          );
+          return;
+        }
+        if (crc32Fn) {
+          crc = crc32Fn(chunk, crc);
+        }
+        controller.enqueue(chunk);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
     },
-    flush(controller) {
-      if (expectedSize !== undefined && byteCount < expectedSize) {
-        controller.error(
-          new Error(
-            `Not enough bytes in the stream. Expected ${expectedSize}, got only ${byteCount}.`,
-          ),
-        );
-        return;
-      }
-      if (expectedCrc32 !== undefined && crc !== expectedCrc32) {
-        controller.error(
-          new Error(
-            `CRC32 validation failed. Expected ${expectedCrc32}, received ${crc}.`,
-          ),
-        );
-      }
-    },
-  });
+    { highWaterMark: 0 },
+  );
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string") return code;
+  return "unexpected end of compressed data";
 }

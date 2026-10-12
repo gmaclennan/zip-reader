@@ -52,14 +52,14 @@ describe("Node deflate-raw DecompressionStream", () => {
   });
 
   // ZipEntry relies on this to tell upstream errors from decompression errors
-  it("passes an upstream error through as the same object", async () => {
+  it("passes an abort reason through as the same object", async () => {
     const upstream = new Error("source failed");
-    const input = new ReadableStream<Uint8Array<ArrayBuffer>>({
-      pull(controller) {
-        controller.error(upstream);
-      },
-    });
-    const reader = input.pipeThrough(createInflate()).getReader();
+    const inflate = createInflate();
+    const reader = inflate.readable.getReader();
+    inflate.writable
+      .getWriter()
+      .abort(upstream)
+      .catch(() => {});
     await expect(reader.read()).rejects.toBe(upstream);
   });
 });

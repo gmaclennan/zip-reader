@@ -1095,8 +1095,8 @@ describe("Edge cases and malformed ZIP handling", () => {
         largestChunk = Math.max(largestChunk, value.byteLength);
       }
       await reader.cancel();
-      // At most 16 KiB written at a time, at deflate's ~1032:1 maximum ratio
-      expect(largestChunk).toBeLessThanOrEqual(1032 * 16384);
+      // Reads are at most 64 KiB, at deflate's ~1032:1 maximum ratio
+      expect(largestChunk).toBeLessThanOrEqual(1032 * 65536);
     }, 30_000);
   });
 

@@ -15,10 +15,6 @@ import { readFields, dosDateTimeToDate } from "./utils.js";
 import { LFH_FIELDS } from "./zip-records.js";
 import { DecompressionFailed } from "./errors.js";
 
-// WebKit inflates a whole input chunk into one output chunk, so a 64 KiB write
-// can emit 64 MiB at once; 16 KiB writes cap that at ~16 MiB
-const MAX_DECOMPRESSOR_WRITE = 16384;
-
 const QUEUING_STRATEGY = new ByteLengthQueuingStrategy({
   highWaterMark: 65536,
 });
@@ -220,13 +216,7 @@ export class ZipEntry {
         chunkSize,
       );
       bytesRead += chunk.byteLength;
-      if (decompress && chunk.byteLength > MAX_DECOMPRESSOR_WRITE) {
-        for (let i = 0; i < chunk.byteLength; i += MAX_DECOMPRESSOR_WRITE) {
-          controller.enqueue(chunk.subarray(i, i + MAX_DECOMPRESSOR_WRITE));
-        }
-      } else {
-        controller.enqueue(chunk);
-      }
+      controller.enqueue(chunk);
 
       if (bytesRead >= compressedSize) {
         controller.close();

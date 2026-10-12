@@ -12,7 +12,7 @@ export class BlobSource implements RandomAccessSource {
   async read(offset: number, length: number): Promise<Uint8Array<ArrayBuffer>> {
     if (offset < 0 || offset + length > this.size) {
       throw new RangeError(
-        `Read out of bounds: offset=${offset} length=${length} size=${this.size}`
+        `Read out of bounds: offset=${offset} length=${length} size=${this.size}`,
       );
     }
     const slice = this.#blob.slice(offset, offset + length);

@@ -397,7 +397,7 @@ class MacState implements MacArchiveHandler {
     const extraFields: Array<{ id: number; data: Uint8Array }> = [];
     const efStart = filenameLength;
     const efEnd = efStart + extraFieldLength;
-    for (let i = efStart; i < efEnd - 3; ) {
+    for (let i = efStart; i < efEnd - 3;) {
       const efView = new DataView(
         varBuf.buffer,
         varBuf.byteOffset,

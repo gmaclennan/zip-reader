@@ -181,7 +181,7 @@ function parseCdEntry(
   let zip64EiefData: Uint8Array | undefined;
   let unicodePathData: Uint8Array | undefined;
 
-  for (let i = extraFieldStart; i < extraFieldEnd - 3; ) {
+  for (let i = extraFieldStart; i < extraFieldEnd - 3;) {
     const headerId = view.getUint16(i, true);
     const dataSize = view.getUint16(i + 2, true);
     const dataEnd = i + 4 + dataSize;

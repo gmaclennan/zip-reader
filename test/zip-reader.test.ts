@@ -1,5 +1,8 @@
 import { describe, it, expect, expectTypeOf } from "vitest";
-import { ZipReader, ZipEntry } from "../src/index.js";
+import { ZipReader, ZipEntry, isRandomAccessSource } from "../src/index.js";
+import type { RandomAccessSource } from "../src/index.js";
+import { BufferSource } from "../src/sources/buffer.js";
+import { BlobSource } from "../src/sources/blob.js";
 import { macArchive } from "../src/mac-archive.js";
 import {
   openZipSource,
@@ -348,5 +351,61 @@ describe("ZipReader", () => {
         await source.close();
       }
     });
+  });
+});
+
+describe("isRandomAccessSource", () => {
+  const read = async () => new Uint8Array(0);
+
+  it("accepts the built-in sources", () => {
+    const bytes = new Uint8Array(4);
+    expect(isRandomAccessSource(new BufferSource(bytes))).toBe(true);
+    expect(isRandomAccessSource(new BlobSource(new Blob([bytes])))).toBe(true);
+  });
+
+  it.skipIf(isBrowser)("accepts FileSource", async () => {
+    const { FileSource } = await import("../src/sources/file.js");
+    const { resolve } = await import("node:path");
+    const source = await FileSource.open(
+      resolve(import.meta.dirname, "fixtures/basic/test.zip"),
+    );
+    try {
+      expect(isRandomAccessSource(source)).toBe(true);
+    } finally {
+      await source.close();
+    }
+  });
+
+  it("accepts a plain object with read and size", () => {
+    expect(isRandomAccessSource({ read, size: 0 })).toBe(true);
+    expect(isRandomAccessSource({ read, size: 0, close: async () => {} })).toBe(
+      true,
+    );
+  });
+
+  it("rejects values missing read or size", () => {
+    expect(isRandomAccessSource(null)).toBe(false);
+    expect(isRandomAccessSource(undefined)).toBe(false);
+    expect(isRandomAccessSource("source")).toBe(false);
+    expect(isRandomAccessSource({ read })).toBe(false);
+    expect(isRandomAccessSource({ size: 0 })).toBe(false);
+    expect(isRandomAccessSource({ read, size: "0" })).toBe(false);
+    expect(isRandomAccessSource({ read: "read", size: 0 })).toBe(false);
+  });
+
+  it("rejects a close that is not a function", () => {
+    expect(isRandomAccessSource({ read, size: 0, close: true })).toBe(false);
+  });
+
+  it("rejects a ZipReader", async () => {
+    const zip = await fromFile("basic/test.zip");
+    expect(isRandomAccessSource(zip)).toBe(false);
+  });
+
+  it("narrows to RandomAccessSource", () => {
+    const value: unknown = { read, size: 0 };
+    if (isRandomAccessSource(value)) {
+      expectTypeOf(value).toEqualTypeOf<RandomAccessSource>();
+    }
   });
 });

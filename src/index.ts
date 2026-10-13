@@ -12,6 +12,7 @@ import { OverlapChecker } from "./overlap.js";
 import { crc32 as defaultCrc32 } from "#crc32";
 
 export { ZipEntry } from "./entry.js";
+export { isRandomAccessSource } from "./utils.js";
 export {
   DecompressionFailed,
   DuplicateLocalFileHeader,

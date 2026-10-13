@@ -345,6 +345,13 @@ import { ZipReader, isRandomAccessSource } from "@gmaclennan/zip-reader";
 const zip = isRandomAccessSource(input) ? await ZipReader.from(input) : input;
 ```
 
+### `isZipReader(value)`
+
+Type guard that returns `true` if `value` is a `ZipReader`. Like
+`isRandomAccessSource`, it checks the shape (async iterable with string
+`comment` and boolean `isZip64`), so it also matches a `ZipReader` from another
+copy of this package, where `instanceof` fails.
+
 ### Errors
 
 These errors are exported classes with a stable `code` property, so callers

@@ -1,5 +1,10 @@
 import { describe, it, expect, expectTypeOf } from "vitest";
-import { ZipReader, ZipEntry, isRandomAccessSource } from "../src/index.js";
+import {
+  ZipReader,
+  ZipEntry,
+  isRandomAccessSource,
+  isZipReader,
+} from "../src/index.js";
 import type { RandomAccessSource } from "../src/index.js";
 import { BufferSource } from "../src/sources/buffer.js";
 import { BlobSource } from "../src/sources/blob.js";
@@ -406,6 +411,37 @@ describe("isRandomAccessSource", () => {
     const value: unknown = { read, size: 0 };
     if (isRandomAccessSource(value)) {
       expectTypeOf(value).toEqualTypeOf<RandomAccessSource>();
+    }
+  });
+});
+
+describe("isZipReader", () => {
+  it("accepts a ZipReader", async () => {
+    const zip = await fromFile("basic/test.zip");
+    expect(isZipReader(zip)).toBe(true);
+  });
+
+  it("accepts a ZipReader-shaped object from another module copy", () => {
+    const zip = {
+      comment: "",
+      isZip64: false,
+      async *[Symbol.asyncIterator]() {},
+    };
+    expect(isZipReader(zip)).toBe(true);
+  });
+
+  it("rejects other values", () => {
+    const bytes = new Uint8Array(4);
+    expect(isZipReader(null)).toBe(false);
+    expect(isZipReader(undefined)).toBe(false);
+    expect(isZipReader(new BufferSource(bytes))).toBe(false);
+    expect(isZipReader({ async *[Symbol.asyncIterator]() {} })).toBe(false);
+  });
+
+  it("narrows to ZipReader", async () => {
+    const value: unknown = await fromFile("basic/test.zip");
+    if (isZipReader(value)) {
+      expectTypeOf(value).toEqualTypeOf<ZipReader>();
     }
   });
 });

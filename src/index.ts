@@ -145,3 +145,21 @@ export class ZipReader {
     }
   }
 }
+
+/**
+ * Check whether a value is a `ZipReader`. Duck-typed, so it works across
+ * copies of this module, where `instanceof` fails.
+ */
+export function isZipReader(value: unknown): value is ZipReader {
+  if (value instanceof ZipReader) return true;
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Symbol.asyncIterator in value &&
+    typeof value[Symbol.asyncIterator] === "function" &&
+    "comment" in value &&
+    typeof value.comment === "string" &&
+    "isZip64" in value &&
+    typeof value.isZip64 === "boolean"
+  );
+}

@@ -421,13 +421,14 @@ describe("isZipReader", () => {
     expect(isZipReader(zip)).toBe(true);
   });
 
-  it("accepts a ZipReader-shaped object from another module copy", () => {
-    const zip = {
-      comment: "",
-      isZip64: false,
-      async *[Symbol.asyncIterator]() {},
-    };
-    expect(isZipReader(zip)).toBe(true);
+  const readerShape = {
+    comment: "",
+    isZip64: false,
+    async *[Symbol.asyncIterator]() {},
+  };
+
+  it("accepts a ZipReader-shaped object that is not an instance", () => {
+    expect(isZipReader(readerShape)).toBe(true);
   });
 
   it("rejects other values", () => {
@@ -436,6 +437,18 @@ describe("isZipReader", () => {
     expect(isZipReader(undefined)).toBe(false);
     expect(isZipReader(new BufferSource(bytes))).toBe(false);
     expect(isZipReader({ async *[Symbol.asyncIterator]() {} })).toBe(false);
+  });
+
+  it("rejects objects missing or mistyping a ZipReader property", () => {
+    const { comment, isZip64, ...iterable } = readerShape;
+    expect(isZipReader({ ...iterable, isZip64 })).toBe(false);
+    expect(isZipReader({ ...iterable, comment })).toBe(false);
+    expect(isZipReader({ ...readerShape, comment: null })).toBe(false);
+    expect(isZipReader({ ...readerShape, isZip64: "false" })).toBe(false);
+    expect(isZipReader({ comment, isZip64 })).toBe(false);
+    expect(isZipReader({ ...readerShape, [Symbol.asyncIterator]: true })).toBe(
+      false,
+    );
   });
 
   it("narrows to ZipReader", async () => {

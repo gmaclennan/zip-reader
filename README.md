@@ -341,8 +341,11 @@ already-opened `ZipReader`:
 
 ```ts
 import { ZipReader, isRandomAccessSource } from "@gmaclennan/zip-reader";
+import type { RandomAccessSource } from "@gmaclennan/zip-reader";
 
-const zip = isRandomAccessSource(input) ? await ZipReader.from(input) : input;
+async function open(input: RandomAccessSource | ZipReader): Promise<ZipReader> {
+  return isRandomAccessSource(input) ? ZipReader.from(input) : input;
+}
 ```
 
 ### `isZipReader(value)`

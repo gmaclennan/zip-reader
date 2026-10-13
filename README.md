@@ -77,6 +77,20 @@ const blob = await response.blob();
 const zip = await ZipReader.from(new BlobSource(blob));
 ```
 
+A `File` is a `Blob`, so `BlobSource` also reads files from the
+[Origin Private File System (OPFS)](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system)
+or a file picker. Only the byte ranges needed are read, so the whole archive is
+never loaded into memory.
+
+```ts
+const root = await navigator.storage.getDirectory();
+const handle = await root.getFileHandle("archive.zip");
+const zip = await ZipReader.from(new BlobSource(await handle.getFile()));
+```
+
+`getFile()` returns a snapshot: if the file is modified while it is being read,
+subsequent reads fail with a `NotReadableError`.
+
 ### `FileSource`
 
 Reads directly from a file on disk (Node.js only). Efficient for large archives
@@ -93,34 +107,6 @@ try {
   }
 } finally {
   await source.close();
-}
-```
-
-### `FileSystemFileHandleSource`
-
-Reads from an [Origin Private File System (OPFS)](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system)
-`FileSystemFileHandle`. Efficient for browser environments where ZIP files are
-stored in OPFS, since it reads only the byte ranges needed rather than loading
-the entire file into memory.
-
-Use the static `FileSystemFileHandleSource.open()` factory to construct an
-instance, since determining the file size requires an async call.
-
-```ts
-import { FileSystemFileHandleSource } from "@gmaclennan/zip-reader/opfs-source";
-
-// Get a handle from OPFS
-const root = await navigator.storage.getDirectory();
-const handle = await root.getFileHandle("archive.zip");
-
-const source = await FileSystemFileHandleSource.open(handle);
-const zip = await ZipReader.from(source);
-
-for await (const entry of zip) {
-  if (!entry.isDirectory) {
-    const stream = entry.readable();
-    // ...
-  }
 }
 ```
 

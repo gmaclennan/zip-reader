@@ -331,6 +331,30 @@ Interface for providing random access to ZIP data.
   Read `length` bytes starting at `offset`.
 - `close?(): Promise<void>` - Optional cleanup
 
+### `isRandomAccessSource(value)`
+
+Type guard that returns `true` if `value` has a `read()` method and a numeric
+`size`, and any `close` is a function. It checks the shape rather than using
+`instanceof`, so it also matches custom sources and sources from another copy
+of this package. Useful for APIs that accept either a source or an
+already-opened `ZipReader`:
+
+```ts
+import { ZipReader, isRandomAccessSource } from "@gmaclennan/zip-reader";
+import type { RandomAccessSource } from "@gmaclennan/zip-reader";
+
+async function open(input: RandomAccessSource | ZipReader): Promise<ZipReader> {
+  return isRandomAccessSource(input) ? ZipReader.from(input) : input;
+}
+```
+
+### `isZipReader(value)`
+
+Type guard that returns `true` if `value` is a `ZipReader`. Like
+`isRandomAccessSource`, it checks the shape (async iterable with string
+`comment` and boolean `isZip64`), so it also matches a `ZipReader` from another
+copy of this package, where `instanceof` fails.
+
 ### Errors
 
 These errors are exported classes with a stable `code` property, so callers

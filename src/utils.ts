@@ -1,3 +1,5 @@
+import type { RandomAccessSource } from "./types.js";
+
 /**
  * Convert DOS date + time to a JS Date object.
  * DOS dates have no timezone, so we interpret as UTC.
@@ -89,4 +91,24 @@ export function readFields<const T extends readonly FieldDef[]>(
     }
   }
   return result as FieldResult<T>;
+}
+
+/**
+ * Check whether a value implements `RandomAccessSource`. Duck-typed, so it
+ * works for custom sources and across copies of this module.
+ */
+export function isRandomAccessSource(
+  value: unknown,
+): value is RandomAccessSource {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "read" in value &&
+    typeof value.read === "function" &&
+    "size" in value &&
+    typeof value.size === "number" &&
+    (!("close" in value) ||
+      value.close === undefined ||
+      typeof value.close === "function")
+  );
 }

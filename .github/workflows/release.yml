@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: nearform-actions/optic-release-automation-action@44f9a47791292bd8562812b42ec38e00250e23f6 # v4.13.0
         with:
-          commit-message: "Release {version}"
+          commit-message: "chore: release {version}"
           sync-semver-tags: false
           access: "public"
           # This prefix is added before the prerelease number, e.g. `v3.0.0-next.0`

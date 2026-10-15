@@ -12,7 +12,6 @@ export const COMPRESSION_METHOD_DEFLATE = 8;
 
 // General purpose bit flags
 export const FLAG_ENCRYPTED = 0x1;
-export const FLAG_DATA_DESCRIPTOR = 0x8;
 export const FLAG_UTF8 = 0x800;
 export const FLAG_STRONG_ENCRYPTION = 0x40;
 

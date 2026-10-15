@@ -61,7 +61,7 @@ export function decodeUtf8(data: Uint8Array): string {
  */
 export const U16 = "u16" as const;
 export const U32 = "u32" as const;
-export type FieldSize = typeof U16 | typeof U32;
+type FieldSize = typeof U16 | typeof U32;
 export type FieldDef = readonly [FieldSize, string];
 
 type NamedFields<T extends readonly FieldDef[]> = Extract<

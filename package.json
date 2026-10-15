@@ -4,24 +4,25 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "default": "./dist/index.js"
     },
     "./mac": {
       "types": "./dist/mac-archive.d.ts",
-      "import": "./dist/mac-archive.js"
+      "default": "./dist/mac-archive.js"
     },
     "./buffer-source": {
       "types": "./dist/sources/buffer.d.ts",
-      "import": "./dist/sources/buffer.js"
+      "default": "./dist/sources/buffer.js"
     },
     "./blob-source": {
       "types": "./dist/sources/blob.d.ts",
-      "import": "./dist/sources/blob.js"
+      "default": "./dist/sources/blob.js"
     },
     "./file-source": {
       "types": "./dist/sources/file.d.ts",
-      "import": "./dist/sources/file.js"
-    }
+      "default": "./dist/sources/file.js"
+    },
+    "./package.json": "./package.json"
   },
   "imports": {
     "#crc32": {
@@ -31,7 +32,7 @@
   },
   "type": "module",
   "scripts": {
-    "test": "run-s test:types test:lint test:vitest",
+    "test": "run-s test:types test:lint test:unused test:vitest",
     "prepare": "husky",
     "test:types": "tsc --noEmit && tsc -p tsconfig.node.json",
     "test:lint": "eslint",
@@ -39,7 +40,8 @@
     "bench": "vitest bench --project \"node (bench)\"",
     "coverage": "vitest run --coverage",
     "format": "prettier --write .",
-    "prepack": "rimraf dist && tsc"
+    "prepack": "rimraf dist && tsc",
+    "test:unused": "knip"
   },
   "files": [
     "dist"
@@ -57,12 +59,10 @@
   "license": "MIT",
   "description": "A modern streaming ZIP archive reader for JavaScript that uses the Web Streams API and Compression Streams API.",
   "devDependencies": {
-    "@types/adm-zip": "^0.5.8",
     "@types/node": "^24.19.2",
     "@types/unzipper": "^0.10.11",
     "@types/yauzl": "^3.4.0",
     "@types/yauzl-promise": "^4.0.1",
-    "@vitest/browser": "^5.0.4",
     "@vitest/browser-playwright": "^5.0.4",
     "@vitest/coverage-istanbul": "^5.0.4",
     "@zip.js/zip.js": "^2.23.0",
@@ -72,6 +72,7 @@
     "globals": "^17.13.0",
     "husky": "^9.1.7",
     "jszip": "^3.10.2",
+    "knip": "^6.41.0",
     "lint-staged": "^17.6.0",
     "node-stream-zip": "^1.16.0",
     "npm-run-all": "^4.1.5",
@@ -98,10 +99,10 @@
   },
   "homepage": "https://github.com/gmaclennan/zip-reader#readme",
   "dependencies": {
-    "custom-error-creator": "^1.4.0",
-    "p-mutex": "^1.0.0"
+    "custom-error-creator": "^1.4.0"
   },
   "engines": {
     "node": ">=22.2.0"
-  }
+  },
+  "sideEffects": false
 }

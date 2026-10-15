@@ -14,9 +14,12 @@ jobs:
         os: [ubuntu-latest, windows-2022, macos-latest]
         node: [22, 24, 26]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -47,7 +50,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.playwright-cache-path.outputs.path }}
           key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.PLAYWRIGHT_VERSION }}
@@ -75,11 +78,11 @@ jobs:
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          use_oidc: true
 
       - name: Upload Playwright cache
         if: always() && steps.playwright-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ steps.playwright-cache-path.outputs.path }}
           key: ${{ steps.playwright-cache.outputs.cache-primary-key }}

@@ -59,7 +59,7 @@
   "license": "MIT",
   "description": "A modern streaming ZIP archive reader for JavaScript that uses the Web Streams API and Compression Streams API.",
   "devDependencies": {
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.5",
     "@types/unzipper": "^0.10.11",
     "@types/yauzl": "^3.4.0",
     "@types/yauzl-promise": "^4.0.1",
